@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "448665477631",
+    "project_id": "despedidaapp-5524f",
+    "storage_bucket": "despedidaapp-5524f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:448665477631:android:2dfdab31cd2fe79cf587ca",
+        "android_client_info": {
+          "package_name": "com.example.despedida_pau"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBrvd9A2VB5XhbO3aSIx2eIprhmqL8Iobk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,0 +1,73 @@
+name: despedida
+description: "A new Flutter project."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.8.1
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+
+  # --- FIREBASE (todas compatibles entre sí) ---
+  firebase_core: ^3.15.2
+  firebase_auth: ^5.7.0
+  cloud_firestore: ^5.6.12
+  firebase_storage: ^12.4.10
+  firebase_messaging: ^15.2.10
+  cloud_functions: ^5.6.2
+
+  # --- ESTADO Y UTILIDADES ---
+  get: ^4.6.6
+  permission_handler: ^12.0.1
+  mime: ^2.0.0
+  share_plus: ^11.1.0
+
+  # --- UI / MULTIMEDIA ---
+  lottie: ^3.0.0
+  photo_view: ^0.15.0
+  cached_network_image: ^3.3.1
+  flutter_local_notifications: ^18.0.1
+
+  # --- CÁMARA Y ARCHIVOS ---
+  image_picker: ^1.0.4
+  path_provider: ^2.1.2
+  gal: ^2.3.0
+  dio: ^5.3.3
+  video_player: ^2.8.12
+  video_compress: ^3.1.4
+  video_thumbnail: ^0.5.6
+  flutter_image_compress: ^2.4.0
+  
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/images/mapa_isla.png
+    - assets/images/pau.png
+    - assets/animations/beer_cheers.json
+    - assets/animations/bg_login.json
+    - assets/animations/fireworks.json
+    - assets/audio/notificacion.mp3
+
+  fonts:
+    - family: DancingScript
+      fonts:
+        - asset: assets/fonts/DancingScript-SemiBold.ttf
+          weight: 700
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon/logo.png"
+  min_sdk_android: 21
