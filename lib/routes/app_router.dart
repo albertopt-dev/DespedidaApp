@@ -10,7 +10,7 @@ import 'package:despedida/features/media/screens/camara_screen.dart';
 import 'package:despedida/features/chat/screens/chat_amigos_screen.dart';
 import 'package:despedida/features/rules/rules_screen.dart';
 import '../features/auth/bindings/home_binding.dart'; // <- Ruta corregida
-
+import 'package:despedida/features/media/views/web_video_recorder_page.dart';
 import '../features/auth/bindings/login_binding.dart';
 import '../features/auth/bindings/register_binding.dart';
 
@@ -24,6 +24,7 @@ class AppRoutes {
   static const String camara     = '/camara';
   static const String chat       = '/chat';
   static const String rules      = '/rules';
+  static const webVideoRecorder = '/web-video-recorder';
 
   static final routes = <GetPage>[
     GetPage(
@@ -78,6 +79,17 @@ class AppRoutes {
       name: rules,
       page: () => const RulesScreen(),
       transition: Transition.downToUp,
+    ),
+
+    GetPage(
+      name: webVideoRecorder,
+      page: () {
+        final params = Get.parameters;
+        final groupId = params['groupId'] ?? '';
+        final base = params['baseIndex'];
+        final int? baseIndex = (base == null || base.isEmpty) ? null : int.tryParse(base);
+        return WebVideoRecorderPage(groupId: groupId, baseIndex: baseIndex);
+      },
     ),
 
   ];

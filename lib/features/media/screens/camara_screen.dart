@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:despedida/features/media/controller/camara_controller.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:despedida/routes/app_router.dart';
+
 
 class CamaraScreen extends StatelessWidget {
   final String grupoId;
@@ -94,6 +97,17 @@ class CamaraScreen extends StatelessWidget {
                     ),
 
                     const SizedBox(height: 26),
+
+                    // Botón extra solo visible en Web
+                    if (kIsWeb)
+                      ElevatedButton(
+                        onPressed: () {
+                          Get.toNamed(
+                            '${AppRoutes.webVideoRecorder}?groupId=$grupoId&baseIndex=${baseIndex ?? ''}',
+                          );
+                        },
+                        child: const Text('Grabar vídeo (Web)'),
+                      ),
 
                     const Text(
                       'Se guardará en la base actual',

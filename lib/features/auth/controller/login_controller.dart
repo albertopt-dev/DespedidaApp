@@ -59,6 +59,8 @@ class LoginController extends GetxController {
           duration: const Duration(seconds: 4),
         );
         await FirebaseAuth.instance.signOut();
+        Get.deleteAll(force: true);              // <-- limpia estado GetX
+        Get.offAllNamed(AppRoutes.login);        // <-- vuelve a Login en Web
         return;
       }
 

@@ -65,6 +65,7 @@ class RegisterController extends GetxController {
       // Logout y a login
       isLoading.value = true;
       await FirebaseAuth.instance.signOut();
+      Get.deleteAll(force: true); // <-- limpia controladores (clave en Web)
       Get.snackbar('Cuenta creada', 'Te has unido correctamente. Inicia sesión para continuar');
       Get.offAllNamed(AppRoutes.login);
     } catch (e) {
