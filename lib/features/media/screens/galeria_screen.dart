@@ -6,19 +6,36 @@ import 'package:get/get.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:mime/mime.dart';
 import 'package:permission_handler/permission_handler.dart';
-
+import 'package:flutter/foundation.dart' show kIsWeb;
 import '../controller/gallery_controller.dart';
 import '../models/media_item.dart';
 import '../widgets/media_detail_view.dart';
+import 'package:despedida/web/io_stub.dart'
+    if (dart.library.html) 'package:despedida/web/io_web.dart' as webio;
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'dart:ui';  
 
 class GaleriaScreen extends StatelessWidget {
-  const GaleriaScreen({super.key});
+  GaleriaScreen({super.key});
+
+  final picker = ImagePicker(); // <- Añade esta línea
 
   @override
   Widget build(BuildContext context) {
-    final args = Get.arguments as Map<String, dynamic>;
-    final String groupId = args['groupId'] as String;
-    final int? baseIndex = args['baseIndex'] as int?;
+    final raw = Get.arguments;
+    final Map<String, dynamic> args = (raw is Map)
+        ? Map<String, dynamic>.from(
+            raw.map((k, v) => MapEntry(k.toString(), v)),
+          )
+        : const <String, dynamic>{};
+
+    final String groupId = (args['groupId'] ?? '') as String;
+    final int? baseIndex = args['baseIndex'] is int
+        ? args['baseIndex'] as int
+        : int.tryParse('${args['baseIndex']}');
+
 
     // Tag único por grupo+base para poder encontrar el controller desde /camara si hace falta.
     final tag = 'gallery-$groupId-$baseIndex';
@@ -65,6 +82,8 @@ class GaleriaScreen extends StatelessWidget {
                   icon: const Icon(Icons.download),
                   onPressed: c.bulkWorking.value ? null : c.downloadSelected,
                 ),
+
+                
                 IconButton(
                   tooltip: 'Eliminar selección',
                   icon: const Icon(Icons.delete_outline, color: Colors.red),
@@ -277,6 +296,82 @@ class GaleriaScreen extends StatelessWidget {
     GalleryController c,
     String tag,
   ) async {
+    // ------ WEB (Safari/Chrome/Firefox) ------
+    if (kIsWeb) {
+      try {
+        await _withProgress(context, () async {
+          final pick = await webio.pickAnyFileWeb();
+          if (pick == null) return;
+
+          final lowerName = pick.filename.toLowerCase();
+          String mime = pick.mime.isNotEmpty ? pick.mime : 'application/octet-stream';
+
+          // Decide mediaType por MIME, no por extensión
+          String mediaType = 'file';
+          if (mime.startsWith('image/')) mediaType = 'image';
+          else if (mime.startsWith('video/')) mediaType = 'video';
+
+          // Saca la extensión: primero por nombre, si no, por MIME
+          String ext = '';
+          final dot = lowerName.lastIndexOf('.');
+          if (dot != -1 && dot < lowerName.length - 1) {
+            ext = lowerName.substring(dot + 1);
+          }
+          if (ext.isEmpty) {
+            // fallback por MIME
+            if (mime == 'image/jpeg') ext = 'jpg';
+            else if (mime == 'image/png') ext = 'png';
+            else if (mime == 'image/webp') ext = 'webp';
+            else if (mime == 'image/heic') ext = 'heic';
+            else if (mime == 'video/mp4') ext = 'mp4';
+            else if (mime == 'video/quicktime') ext = 'mov';
+            else if (mime == 'video/webm') ext = 'webm';
+            else ext = 'bin';
+          }
+
+          final uid = c.service.userUid ?? FirebaseAuth.instance.currentUser?.uid;
+          if (uid == null) {
+            Get.snackbar('Sesión', 'Debes iniciar sesión');
+            return;
+          }
+
+          final ts = DateTime.now().millisecondsSinceEpoch;
+          final folderBase = c.baseIndex == null ? 'general' : '${c.baseIndex}';
+          final storagePath = 'uploads/groups/${c.groupId}/bases/$folderBase/${ts}_$uid.$ext';
+
+          final ref = FirebaseStorage.instance.ref(storagePath);
+          await ref.putData(pick.bytes, SettableMetadata(contentType: mime));
+          final url = await ref.getDownloadURL();
+
+          await FirebaseFirestore.instance
+              .collection('groups')
+              .doc(c.groupId)
+              .collection('media')
+              .add({
+            'groupId': c.groupId,
+            'baseIndex': c.baseIndex,
+            'ownerUid': uid,
+            'type': mediaType,          // ⬅️ 'image' o 'video' según MIME real
+            'storagePath': storagePath,
+            'downloadURL': url,
+            'contentType': mime,
+            'ext': ext,
+            'createdAt': FieldValue.serverTimestamp(),
+          });
+        });
+
+        await c.loadInitial();
+        Get.snackbar('Listo', 'Contenido subido', snackPosition: SnackPosition.BOTTOM);
+      } catch (e) {
+        Get.snackbar('Error', e.toString(), snackPosition: SnackPosition.BOTTOM);
+      }
+      return;
+    }
+
+
+
+
+    // ------ ANDROID / iOS nativo (lo tuyo de siempre) ------
     await _ensurePermissions();
 
     final source = await showModalBottomSheet<_PickAction>(
@@ -306,11 +401,10 @@ class GaleriaScreen extends StatelessWidget {
 
     if (source == null) return;
 
-    final picker = ImagePicker();
-
+    // ... tu flujo actual móvil tal cual (no lo toco)
     try {
       switch (source) {
-        case _PickAction.cameraPhoto:
+        case _PickAction.cameraPhoto: {
           final x = await picker.pickImage(
             source: ImageSource.camera,
             imageQuality: 85, // compresión básica
@@ -318,22 +412,24 @@ class GaleriaScreen extends StatelessWidget {
           if (x == null) return;
           await c.uploadFile(file: File(x.path), contentType: 'image/jpeg');
           break;
+        }
 
-        case _PickAction.galleryPhoto:
+        case _PickAction.galleryPhoto: {
           final x = await picker.pickImage(source: ImageSource.gallery);
           if (x == null) return;
           final file = File(x.path);
           final mime = lookupMimeType(file.path) ?? 'image/jpeg';
           await c.uploadFile(file: file, contentType: mime);
           break;
+        }
 
-        case _PickAction.galleryVideo:
+        case _PickAction.galleryVideo: {
           final x = await picker.pickVideo(source: ImageSource.gallery);
           if (x == null) return;
           final file = File(x.path);
           final mime = lookupMimeType(file.path) ?? 'video/mp4';
 
-          // Subimos con el servicio para poder capturar errores de cuota/duración
+          // Mantenemos tu flujo original con compresión/validación vía service.upload
           await for (final e in c.service.upload(
             groupId: c.groupId,
             baseIndex: c.baseIndex,
@@ -347,8 +443,7 @@ class GaleriaScreen extends StatelessWidget {
                 } else {
                   await Gal.putImage(file.path);
                 }
-                Get.snackbar(
-                    'Nube llena / no permitido', 'Se guardó en tu dispositivo.');
+                Get.snackbar('Nube llena / no permitido', 'Se guardó en tu dispositivo.');
               } catch (_) {
                 Get.snackbar('Error', 'No se pudo guardar localmente.');
               }
@@ -361,11 +456,15 @@ class GaleriaScreen extends StatelessWidget {
             }
           }
           break;
+        }
       }
+
     } catch (e) {
-      Get.snackbar('Error', e.toString());
+      Get.snackbar('Error', e.toString(), snackPosition: SnackPosition.BOTTOM);
     }
   }
+
+
 
   Future<void> _ensurePermissions() async {
     await [
@@ -429,6 +528,89 @@ class GaleriaScreen extends StatelessWidget {
       ),
     );
   }
+
+  Future<T> _withProgress<T>(
+      BuildContext context,
+      Future<T> Function() task, {
+      String text = 'Subiendo…',
+    }) async {
+      Get.dialog(
+        WillPopScope(
+          onWillPop: () async => false,
+          child: Stack(
+            children: [
+              // Fondo a pantalla completa (mismo degradado que la app)
+              Positioned.fill(
+                child: Container(
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Color.fromARGB(255, 86, 212, 143),
+                        Color.fromARGB(255, 48, 143, 106),
+                        Color.fromARGB(255, 19, 64, 42),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              // Blur sutil para separar el HUD del fondo
+              Positioned.fill(
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 2.5, sigmaY: 2.5),
+                  child: const SizedBox.expand(),
+                ),
+              ),
+              // Tarjeta centrada
+              Center(
+                child: Container(
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.75),
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: const [
+                      BoxShadow(blurRadius: 12, color: Colors.black54),
+                    ],
+                    border: Border.all(color: Colors.white10),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const SizedBox(
+                        width: 28, height: 28,
+                        child: CircularProgressIndicator(strokeWidth: 3),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        text, // ⬅️ ahora respeta el parámetro
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        barrierDismissible: false,
+        barrierColor: Colors
+            .transparent, // ⬅️ sin velo negro por encima del fondo
+      );
+
+      try {
+        final r = await task();
+        return r;
+      } finally {
+        if (Get.isDialogOpen ?? false) Get.back();
+      }
+    }
+
+
 }
 
 enum _PickAction { cameraPhoto, galleryPhoto, galleryVideo }

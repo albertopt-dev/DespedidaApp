@@ -1,10 +1,9 @@
 plugins {
     id("com.android.application")
-    id("kotlin-android")
+    id("org.jetbrains.kotlin.android")
     id("dev.flutter.flutter-gradle-plugin")
-    id("com.google.gms.google-services")
+    id("com.google.gms.google-services") // 👈 sin versión aquí
 }
-
 
 android {
     namespace = "com.example.despedida_pau"
@@ -14,7 +13,7 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-        isCoreLibraryDesugaringEnabled = true // 👈 usa "isCoreLibraryDesugaringEnabled"
+        isCoreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {
@@ -22,10 +21,7 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.example.despedida_pau"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
@@ -34,8 +30,6 @@ android {
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
         }
     }
@@ -44,13 +38,11 @@ android {
 flutter {
     source = "../.."
 }
-dependencies {
-    // Import the Firebase BoM
-    implementation(platform("com.google.firebase:firebase-bom:34.0.0"))
 
+dependencies {
+    implementation(platform("com.google.firebase:firebase-bom:34.0.0"))
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
 
-    // Firebase Core
-    implementation("com.google.firebase:firebase-analytics") // ejemplo, luego pondremos auth, firestore, etc.
+    // Ejemplo; añade aquí tus otros artifacts de Firebase si los necesitas:
+    implementation("com.google.firebase:firebase-analytics")
 }
-

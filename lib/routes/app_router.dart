@@ -56,25 +56,42 @@ class AppRoutes {
     ),
     GetPage(
       name: galeria,
-      page: () => const GaleriaScreen(),
+      page: () => GaleriaScreen(),
     ),
     GetPage(
       name: camara,
       page: () {
-        final args = (Get.arguments ?? {}) as Map<String, dynamic>;
-        final String groupId = args['groupId'] as String;
-        final int? baseIndex = args['baseIndex'] as int?;
+        final raw = Get.arguments;
+        final Map<String, dynamic> args = (raw is Map)
+            ? Map<String, dynamic>.from(
+                raw.map((k, v) => MapEntry(k.toString(), v)),
+              )
+            : const <String, dynamic>{};
+
+        final String groupId = (args['groupId'] ?? '') as String;
+        final int? baseIndex = args['baseIndex'] is int
+            ? args['baseIndex'] as int
+            : int.tryParse('${args['baseIndex']}');
+
         return CamaraScreen(grupoId: groupId, baseIndex: baseIndex);
       },
     ),
+
     GetPage(
       name: chat,
       page: () {
-        final args = (Get.arguments ?? {}) as Map<String, dynamic>;
-        final String groupId = args['groupId'] as String;
+        final raw = Get.arguments;
+        final Map<String, dynamic> args = (raw is Map)
+            ? Map<String, dynamic>.from(
+                raw.map((k, v) => MapEntry(k.toString(), v)),
+              )
+            : const <String, dynamic>{};
+
+        final String groupId = (args['groupId'] ?? '') as String;
         return ChatAmigosScreen(groupId: groupId);
       },
     ),
+
     GetPage(
       name: rules,
       page: () => const RulesScreen(),
@@ -84,9 +101,10 @@ class AppRoutes {
     GetPage(
       name: webVideoRecorder,
       page: () {
-        final params = Get.parameters;
-        final groupId = params['groupId'] ?? '';
-        final base = params['baseIndex'];
+        // Get.parameters ya es Map<String, String?> pero sé estricto
+        final Map<String, String> params = Map<String, String>.from(Get.parameters);
+        final String groupId = params['groupId'] ?? '';
+        final String? base = params['baseIndex'];
         final int? baseIndex = (base == null || base.isEmpty) ? null : int.tryParse(base);
         return WebVideoRecorderPage(groupId: groupId, baseIndex: baseIndex);
       },

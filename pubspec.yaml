@@ -1,5 +1,5 @@
 name: despedida
-description: "A new Flutter project."
+description: "Proyecto para una app de despedidas de soltero/a"
 publish_to: 'none'
 
 version: 1.0.0+1
@@ -44,6 +44,8 @@ dependencies:
   flutter_image_compress: ^2.4.0
   camera: ^0.10.5+9
   camera_web: ^0.3.2+2
+  file_picker: ^8.0.0
+  web: ^1.1.1
   
 
 dev_dependencies:

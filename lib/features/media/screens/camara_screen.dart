@@ -56,7 +56,7 @@ class CamaraScreen extends StatelessWidget {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    // Tarjeta/pista superior
+                    // Tarjeta superior
                     Container(
                       padding: const EdgeInsets.all(18),
                       margin: const EdgeInsets.only(bottom: 18),
@@ -71,43 +71,55 @@ class CamaraScreen extends StatelessWidget {
                           SizedBox(width: 10),
                           Text(
                             '¿Qué deseas hacer?',
-                            style: TextStyle(color: Colors.white70, fontSize: 16, fontWeight: FontWeight.w600),
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ],
                       ),
                     ),
                     const SizedBox(width: 18),
-                    // Botón: Tomar foto
-                    _ActionButton(
-                      color: const Color(0xFF00E5FF),     // cian que usas en la app
-                      foreground: Colors.black,            // texto/ícono en negro
-                      icon: Icons.photo_camera_outlined,
-                      label: 'Tomar foto',
-                      onTap: controller.tomarFoto,
-                    ),
-                    const SizedBox(height: 14),
 
-                    // Botón: Grabar video
-                    _ActionButton(
-                      color: const Color(0xFF4286F4),     // azul de tus botones
-                      foreground: Colors.white,
-                      icon: Icons.videocam_outlined,
-                      label: 'Grabar video',
-                      onTap: controller.grabarVideo,
-                    ),
-
-                    const SizedBox(height: 26),
-
-                    // Botón extra solo visible en Web
-                    if (kIsWeb)
-                      ElevatedButton(
-                        onPressed: () {
-                          Get.toNamed(
-                            '${AppRoutes.webVideoRecorder}?groupId=$grupoId&baseIndex=${baseIndex ?? ''}',
-                          );
-                        },
-                        child: const Text('Grabar vídeo (Web)'),
+                    if (!kIsWeb) ...[
+                      // Botón: Tomar foto (solo Android/iOS)
+                      _ActionButton(
+                        color: const Color(0xFF00E5FF),
+                        foreground: Colors.black,
+                        icon: Icons.photo_camera_outlined,
+                        label: 'Tomar foto',
+                        onTap: controller.tomarFoto,
                       ),
+                      const SizedBox(height: 14),
+
+                      // Botón: Grabar video (solo Android/iOS)
+                      _ActionButton(
+                        color: const Color(0xFF4286F4),
+                        foreground: Colors.white,
+                        icon: Icons.videocam_outlined,
+                        label: 'Grabar video',
+                        onTap: controller.grabarVideo,
+                      ),
+                      const SizedBox(height: 26),
+                    ] else ...[
+                      // Botón único en Web con mismo estilo y centrado
+                      Center(
+                        child: _ActionButton(
+                          color: const Color(0xFF4286F4),
+                          foreground: Colors.white,
+                          icon: Icons.photo_camera,
+                          label: 'Foto/vídeo',
+                          onTap: () {
+
+                            Get.toNamed(
+                              '${AppRoutes.webVideoRecorder}?groupId=$grupoId&baseIndex=${baseIndex ?? ''}',
+                            );
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 30),
+                    ],
 
                     const Text(
                       'Se guardará en la base actual',
@@ -116,6 +128,7 @@ class CamaraScreen extends StatelessWidget {
                     ),
                   ],
                 ),
+
               ),
             ),
           ),
@@ -123,7 +136,7 @@ class CamaraScreen extends StatelessWidget {
           // Overlay de subida (cuando isUploading = true)
           Obx(() => controller.isUploading.value
             ? Container(
-                color: Colors.black54,
+                color: const Color.fromARGB(223, 151, 255, 82),
                 alignment: Alignment.center,
                 child: Container(
                   width: 300,

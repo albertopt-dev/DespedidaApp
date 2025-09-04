@@ -4,8 +4,15 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:video_compress/video_compress.dart';
-
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:file_picker/file_picker.dart';
 import '../models/media_item.dart';
+import 'package:get/get.dart';
+// Solo Web
+import 'package:despedida/web/io_stub.dart'
+    if (dart.library.html) 'package:despedida/web/io_web.dart' as webio;
+import 'dart:typed_data'; // <- para ByteBuffer / Uint8List
+
 
 /// Excepción para controlar el flujo cuando no cabe en la cuota.
 class GalleryQuotaExceeded implements Exception {
@@ -27,6 +34,9 @@ class GalleryService {
   final FirebaseFirestore _db;
   final FirebaseStorage _storage;
   final FirebaseAuth _auth;
+
+  // Añade este getter
+  String? get userUid => _auth.currentUser?.uid;
 
   CollectionReference<Map<String, dynamic>> _mediaCol(String groupId) =>
       _db.collection('groups').doc(groupId).collection('media');
@@ -170,6 +180,9 @@ class GalleryService {
         'createdAt': FieldValue.serverTimestamp(),
         if (thumbUrl != null) 'thumbnailURL': thumbUrl,
         if (videoDuration != null) 'durationSec': videoDuration,
+        'contentType': uploadContentType,
+        'ext': ext,
+
       });
 
       // Leer createdAt server y construir modelo
@@ -247,15 +260,18 @@ class GalleryService {
 
   String? _extFromContentType(String ct) {
     const map = {
-      'image/jpeg': 'jpg',
-      'image/jpg': 'jpg',
-      'image/png': 'png',
-      'image/heic': 'heic',
-      'image/webp': 'webp',
-      'video/mp4': 'mp4',
-      'video/quicktime': 'mov',
-      'video/x-matroska': 'mkv',
-    };
+    'image/jpeg': 'jpg',
+    'image/jpg': 'jpg',
+    'image/png': 'png',
+    'image/webp': 'webp',
+    'image/heic': 'heic',
+    'image/heif': 'heif',
+    'video/mp4': 'mp4',
+    'video/quicktime': 'mov',
+    'video/webm': 'webm',
+    'video/x-matroska': 'mkv',
+  };
+
     return map[ct];
   }
 
@@ -264,4 +280,178 @@ class GalleryService {
     final parts = name.split('.');
     return parts.length > 1 ? parts.last.toLowerCase() : 'dat';
   }
+
+  Future<void> pickAndUploadFromWeb({
+    required String groupId,
+    int? baseIndex,
+  }) async {
+    if (!kIsWeb) return; // seguridad: solo web
+
+    final result = await FilePicker.platform.pickFiles(
+      allowMultiple: false,
+      withData: true, // necesitamos bytes en memoria
+      type: FileType.custom,
+      allowedExtensions: ['jpg', 'jpeg', 'png', 'webp', 'mp4', 'mov', 'webm'],
+    );
+
+    if (result == null || result.files.isEmpty) return;
+
+    final file = result.files.first;
+    final bytes = file.bytes;
+    final name = (file.name ?? '').toLowerCase();
+
+    if (bytes == null || name.isEmpty) return;
+
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) {
+      Get.snackbar('Sesión', 'Debes iniciar sesión');
+      return;
+    }
+
+    // Detecta tipo por extensión
+    String ext = 'bin';
+    String contentType = 'application/octet-stream';
+    String mediaType = 'file';
+
+    if (name.endsWith('.jpg') || name.endsWith('.jpeg')) {
+      ext = 'jpg'; contentType = 'image/jpeg'; mediaType = 'image';
+    } else if (name.endsWith('.png')) {
+      ext = 'png'; contentType = 'image/png'; mediaType = 'image';
+    } else if (name.endsWith('.webp')) {
+      ext = 'webp'; contentType = 'image/webp'; mediaType = 'image';
+    } else if (name.endsWith('.webm')) {
+      ext = 'webm'; contentType = 'video/webm'; mediaType = 'video';
+    } else if (name.endsWith('.mp4')) {
+      ext = 'mp4'; contentType = 'video/mp4'; mediaType = 'video';
+    } else if (name.endsWith('.mov')) {
+      ext = 'mov'; contentType = 'video/quicktime'; mediaType = 'video';
+    }
+
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    final folderBase = baseIndex == null ? 'general' : '$baseIndex';
+    final storagePath = 'uploads/groups/$groupId/bases/$folderBase/${ts}_$uid.$ext';
+
+    final ref = _storage.ref(storagePath);
+    await ref.putData(bytes, SettableMetadata(contentType: contentType));
+    final url = await ref.getDownloadURL();
+
+    await _db
+        .collection('groups')
+        .doc(groupId)
+        .collection('media')
+        .add({
+      'groupId': groupId,
+      'baseIndex': baseIndex,
+      'ownerUid': uid,
+      'type': mediaType,         // 'image' | 'video'
+      'storagePath': storagePath,
+      'downloadURL': url,
+      'contentType': contentType, // <-- una sola vez
+      'ext': ext,                 // <-- una sola vez
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Future<void> capturePhotoFromWeb({
+    required String groupId,
+    int? baseIndex,
+  }) async {
+    if (!kIsWeb) return;
+
+    final pick = await webio.capturePhotoWeb(); // helper web, null en móvil
+    if (pick == null) return;
+
+    final bytes = pick.bytes;
+    final name  = pick.filename.toLowerCase();
+
+    String ext = 'jpg';
+    String contentType = 'image/jpeg';
+    if (name.endsWith('.png')) {
+      ext = 'png'; contentType = 'image/png';
+    } else if (name.endsWith('.webp')) {
+      ext = 'webp'; contentType = 'image/webp';
+    } else if (name.endsWith('.heic') || name.endsWith('.heif')) {
+      ext = 'heic'; contentType = 'image/heic';
+    }
+
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) {
+      Get.snackbar('Sesión', 'Debes iniciar sesión');
+      return;
+    }
+
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    final folderBase = baseIndex == null ? 'general' : '$baseIndex';
+    final path = 'uploads/groups/$groupId/bases/$folderBase/${ts}_$uid.$ext';
+
+    final ref = _storage.ref(path);
+    await ref.putData(bytes, SettableMetadata(contentType: contentType));
+    final url = await ref.getDownloadURL();
+
+    await _db.collection('groups').doc(groupId).collection('media').add({
+      'groupId': groupId,
+      'baseIndex': baseIndex,
+      'ownerUid': uid,
+      'type': 'image',
+      'storagePath': path,
+      'downloadURL': url,
+      'contentType': contentType,
+      'ext': ext,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+
+    Get.snackbar('Subido', 'Imagen subida', snackPosition: SnackPosition.BOTTOM);
+  }
+
+
+
+  Future<void> captureVideoFromWeb({
+    required String groupId,
+    int? baseIndex,
+  }) async {
+    if (!kIsWeb) return;
+
+    final pick = await webio.captureVideoWeb(); // helper web, null en móvil
+    if (pick == null) return;
+
+    final bytes = pick.bytes;
+    final name  = pick.filename.toLowerCase();
+
+    String ext = 'mp4';
+    String contentType = 'video/mp4';
+    if (name.endsWith('.mov')) {
+      ext = 'mov'; contentType = 'video/quicktime';
+    } else if (name.endsWith('.webm')) {
+      ext = 'webm'; contentType = 'video/webm';
+    }
+
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) {
+      Get.snackbar('Sesión', 'Debes iniciar sesión');
+      return;
+    }
+
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    final folderBase = baseIndex == null ? 'general' : '$baseIndex';
+    final path = 'uploads/groups/$groupId/bases/$folderBase/${ts}_$uid.$ext';
+
+    final ref = _storage.ref(path);
+    await ref.putData(bytes, SettableMetadata(contentType: contentType));
+    final url = await ref.getDownloadURL();
+
+    await _db.collection('groups').doc(groupId).collection('media').add({
+      'groupId': groupId,
+      'baseIndex': baseIndex,
+      'ownerUid': uid,
+      'type': 'video',
+      'storagePath': path,
+      'downloadURL': url,
+      'contentType': contentType,
+      'ext': ext,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+
+    Get.snackbar('Subido', 'Vídeo subido', snackPosition: SnackPosition.BOTTOM);
+  }
+
 }
