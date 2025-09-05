@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:intl/intl.dart';
 
 class MediaItem {
   final String id;
@@ -51,4 +52,12 @@ class MediaItem {
         if (thumbnailURL != null) 'thumbnailURL': thumbnailURL,
         if (durationSec != null) 'durationSec': durationSec,
       };
+}
+
+extension MediaItemFormat on MediaItem {
+  String get createdAtFormatted {
+    final dt = createdAt;
+    // dd/MM/yyyy y HH:mm (24h). Ajusta a tu gusto.
+    return DateFormat('dd/MM/yyyy\nHH:mm').format(dt);
+  }
 }

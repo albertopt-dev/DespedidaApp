@@ -14,6 +14,12 @@ import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, Tar
 import 'routes/app_router.dart';
 import 'firebase_options.dart';
 
+import 'package:despedida/web/web_error_handler_stub.dart'
+    if (dart.library.html) 'package:despedida/web/web_error_handler.dart';
+    
+import 'dart:async';
+
+
 // ====== CANALES ANDROID ======
 // (solo los usa Android; en Web/iOS quedan ignorados)
 const AndroidNotificationChannel channel = AndroidNotificationChannel(
@@ -66,7 +72,13 @@ Future<void> main() async {
   // Solo Web: persistencia por sesión (se borra al cerrar pestaña)
   if (kIsWeb) {
     await FirebaseAuth.instance.setPersistence(Persistence.SESSION);
+    setupGlobalWebErrorHandler(show: (title, details) {
+      // aquí usa tu UI; como mínimo:
+      // ignore: avoid_print
+      print('[WEB][$title] $details');
+    });
   }
+
 
 
   // ===== CONFIG SOLO ANDROID/IOS (no Web) =====
@@ -106,31 +118,39 @@ class _MyAppState extends State<MyApp> {
   void initState() {
     super.initState();
 
-    // iOS/Web: presentación en foreground (Web lo ignora sin romper)
-    FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
-      alert: true, badge: true, sound: true,
-    );
+    // === Android / iOS ===
+    if (!kIsWeb) {
+      // iOS: controla cómo se muestran notificaciones en foreground
+      FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
+        alert: true, badge: true, sound: true,
+      );
 
-    // Foreground: muestra notificación local (Android). En Web no hace nada.
-    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      final n = message.notification;
-      final type = message.data['type'] ?? ''; // "prueba" | "chat" | ""
+      // Foreground: tu lógica EXISTENTE (se mantiene igual)
+      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+        final n = message.notification;
+        final type = message.data['type'] ?? ''; // "prueba" | "chat" | ""
+        final title = n?.title ?? 'Notificación';
+        final body  = n?.body  ?? '';
 
-      final title = n?.title ?? 'Notificación';
-      final body  = n?.body  ?? '';
+        if (type == 'prueba') {
+          _mostrarNotificacionNovio(title, body);
+        } else {
+          _mostrarNotificacionChat(title, body);
+        }
+      });
 
-      if (type == 'prueba') {
-        _mostrarNotificacionNovio(title, body);
-      } else {
-        _mostrarNotificacionChat(title, body);
-      }
-    });
+      // (Opcional) ver token nativo
+      FirebaseMessaging.instance.getToken().then((t) {
+        // print('📱 Token FCM: $t');
+      });
 
-    // (Opcional) ver token
-    FirebaseMessaging.instance.getToken().then((t) {
-      // print('📱 Token FCM: $t');
-    });
+      return; // <- nada más que hacer en Android/iOS
+    }
+
+    // === Web ===
+    _initWebMessagingSafely(); // no rompe Android/iOS
   }
+
 
   @override
   Widget build(BuildContext context) {
@@ -225,4 +245,55 @@ class _MyAppState extends State<MyApp> {
       ),
     );
   }
+
+  Future<bool> _isWebMessagingSupported() async {
+    if (!kIsWeb) return false;
+    try {
+      // Disponible en firebase_messaging >= 14.x (si tu versión no lo tiene, avísame y te paso fallback JS)
+      return await FirebaseMessaging.instance.isSupported();
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _enableWebPush() async {
+    // Solo se llama en Web y si supported == true
+    try {
+      final perm = await FirebaseMessaging.instance.requestPermission();
+      if (perm.authorizationStatus == AuthorizationStatus.authorized ||
+          perm.authorizationStatus == AuthorizationStatus.provisional) {
+        final token = await FirebaseMessaging.instance.getToken(
+          vapidKey: 'TU_VAPID_PUBLIC_KEY', // si lo usas
+        );
+        debugPrint('[FCM] Web Token: $token');
+      } else {
+        debugPrint('[FCM] Usuario no concedió permisos Web.');
+      }
+
+      FirebaseMessaging.onMessage.listen((msg) {
+        debugPrint('[FCM Web] onMessage: ${msg.messageId}');
+      });
+    } catch (e) {
+      debugPrint('[FCM Web] error: $e');
+    }
+  }
+
+  Future<void> _initWebMessagingSafely() async {
+  // En Web: sólo continuar si el navegador soporta FCM (Chrome/Edge/Firefox).
+  bool supported = false;
+  try {
+    supported = await FirebaseMessaging.instance.isSupported();
+  } catch (_) {
+    supported = false;
+  }
+
+  if (!supported) {
+    // Safari (iOS/macOS) u otros no soportados → no inicializar, evitar errores.
+    debugPrint('[FCM] Web Messaging no soportado aquí. Omitiendo init.');
+    return;
+  }
+
+}
+
+
 }

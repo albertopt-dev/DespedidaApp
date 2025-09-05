@@ -52,6 +52,25 @@
   window.flutterConfiguration = { renderer: "html" };
   </script>
 
+  <script>
+    window.onerror = function(msg, src, line, col, err) {
+      console.log('[window.onerror]', msg, src, line, col, err);
+    };
+    window.addEventListener('unhandledrejection', function (event) {
+      console.log('[unhandledrejection]', event.reason);
+    });
+  </script>
+
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        // Cuando hay nuevo SW, recarga una vez automáticamente:
+        if (!window._reloadedOnce) { window._reloadedOnce = true; location.reload(); }
+      });
+    }
+  </script>
+
+
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

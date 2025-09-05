@@ -454,4 +454,65 @@ class GalleryService {
     Get.snackbar('Subido', 'Vídeo subido', snackPosition: SnackPosition.BOTTOM);
   }
 
+  // En GalleryService
+  // dentro de class GalleryService
+  Future<void> uploadBytesWeb({
+    required String groupId,
+    int? baseIndex,
+    required Uint8List bytes,
+    required String filename,
+    required String mime,
+    void Function(double p)? onProgress,
+  }) async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) throw StateError('User not signed in');
+
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    final folderBase = baseIndex == null ? 'general' : '$baseIndex';
+
+    // saca extensión desde contentType o nombre
+    String ext = _extFromContentType(mime) ?? (() {
+      final n = filename.toLowerCase();
+      final i = n.lastIndexOf('.');
+      return i >= 0 ? n.substring(i + 1) : 'bin';
+    })();
+
+    final storagePath = 'uploads/groups/$groupId/bases/$folderBase/${ts}_$uid.$ext';
+
+    try {
+      final ref = _storage.ref(storagePath);
+      final task = ref.putData(bytes, SettableMetadata(contentType: mime));
+
+      await for (final s in task.snapshotEvents) {
+        final p = s.totalBytes == 0 ? 0.0 : s.bytesTransferred / s.totalBytes;
+        onProgress?.call(p.clamp(0.0, 1.0));
+      }
+
+      final url = await ref.getDownloadURL();
+
+      await _db.collection('groups').doc(groupId).collection('media').add({
+        'groupId': groupId,
+        'baseIndex': baseIndex,
+        'ownerUid': uid,
+        'type': mime.startsWith('image/')
+            ? 'image'
+            : (mime.startsWith('video/') ? 'video' : 'file'),
+        'storagePath': storagePath,
+        'downloadURL': url,
+        'contentType': mime,
+        'ext': ext,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+    } on FirebaseException catch (e, st) {
+      // ignore: avoid_print
+      print('[WEB] uploadBytesWeb FirebaseException: ${e.code} ${e.message}\n$st');
+      rethrow;
+    } catch (e, st) {
+      // ignore: avoid_print
+      print('[WEB] uploadBytesWeb ERROR: $e\n$st');
+      rethrow;
+    }
+  }
+
+
 }

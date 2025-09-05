@@ -103,20 +103,29 @@ class CamaraScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 26),
                     ] else ...[
-                      // Botón único en Web con mismo estilo y centrado
-                      Center(
-                        child: _ActionButton(
-                          color: const Color(0xFF4286F4),
-                          foreground: Colors.white,
-                          icon: Icons.photo_camera,
-                          label: 'Foto/vídeo',
-                          onTap: () {
-
-                            Get.toNamed(
-                              '${AppRoutes.webVideoRecorder}?groupId=$grupoId&baseIndex=${baseIndex ?? ''}',
-                            );
-                          },
-                        ),
+                      // Web → mismos 3 botones con funciones web
+                      _ActionButton(
+                        color: const Color(0xFF00E5FF),
+                        foreground: Colors.black,
+                        icon: Icons.photo_camera_outlined,
+                        label: 'Tomar foto',
+                        onTap: controller.capturarFotoWeb,
+                      ),
+                      const SizedBox(height: 14),
+                      _ActionButton(
+                        color: const Color(0xFF4286F4),
+                        foreground: Colors.white,
+                        icon: Icons.videocam_outlined,
+                        label: 'Grabar video',
+                        onTap: controller.capturarVideoWeb,
+                      ),
+                      const SizedBox(height: 14),
+                      _ActionButton(
+                        color: const Color(0xFF9C27B0),
+                        foreground: Colors.white,
+                        icon: Icons.photo_library_outlined,
+                        label: 'Subir desde galería',
+                        onTap: controller.pickDesdeGaleriaWeb,
                       ),
                       const SizedBox(height: 30),
                     ],

@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cached_network_image_platform_interface/cached_network_image_platform_interface.dart'; // <- Añade esta línea
 import 'package:flutter/material.dart';
 import 'package:gal/gal.dart';
 import 'package:get/get.dart';
@@ -195,16 +196,13 @@ class GaleriaScreen extends StatelessWidget {
                             CachedNetworkImage(
                               imageUrl: thumb,
                               fit: BoxFit.cover,
+                              imageRenderMethodForWeb: ImageRenderMethodForWeb.HtmlImage, // <- Corregido aquí
                               placeholder: (ctx, __) => const Center(
-                                child: SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                ),
+                                child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
                               ),
-                              errorWidget: (ctx, __, ___) =>
-                                  const ColoredBox(color: Colors.black12),
+                              errorWidget: (ctx, __, ___) => const ColoredBox(color: Colors.black12),
                             ),
+
                             if (item.type == 'video')
                               const Align(
                                 alignment: Alignment.center,
@@ -214,6 +212,27 @@ class GaleriaScreen extends StatelessWidget {
                                   color: Colors.white,
                                 ),
                               ),
+
+                            // Añadir aquí la fecha formateada
+                            Positioned(
+                              left: 4,
+                              bottom: 4,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.black45,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  item.createdAtFormatted ?? '',
+                                  style: const TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 10,
+                                  ),
+                                ),
+                              ),
+                            ),
+
                             if (isSelected)
                               Container(
                                 color: Colors.black26,
@@ -297,76 +316,121 @@ class GaleriaScreen extends StatelessWidget {
     String tag,
   ) async {
     // ------ WEB (Safari/Chrome/Firefox) ------
-    if (kIsWeb) {
+      if (kIsWeb) {
+      final action = await showModalBottomSheet<_PickAction>(
+        context: context,
+        builder: (ctx) => SafeArea(
+          child: Wrap(
+            children: [
+              ListTile(
+                leading: const Icon(Icons.photo_camera),
+                title: const Text('Tomar foto'),
+                onTap: () => Navigator.pop(ctx, _PickAction.cameraPhoto),
+              ),
+              ListTile(
+                leading: const Icon(Icons.videocam),
+                title: const Text('Grabar vídeo'),
+                onTap: () => Navigator.pop(ctx, _PickAction.recordVideo),
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library),
+                title: const Text('Desde galería'),
+                onTap: () => Navigator.pop(ctx, _PickAction.gallery),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      if (action == null) return;
+
       try {
-        await _withProgress(context, () async {
-          final pick = await webio.pickAnyFileWeb();
-          if (pick == null) return;
+        final uid = c.service.userUid ?? FirebaseAuth.instance.currentUser?.uid;
+        if (uid == null) {
+          Get.snackbar('Sesión', 'Debes iniciar sesión');
+          return;
+        }
 
-          final lowerName = pick.filename.toLowerCase();
-          String mime = pick.mime.isNotEmpty ? pick.mime : 'application/octet-stream';
+        final ts = DateTime.now().millisecondsSinceEpoch;
+        final folderBase = c.baseIndex == null ? 'general' : '${c.baseIndex}';
 
-          // Decide mediaType por MIME, no por extensión
-          String mediaType = 'file';
-          if (mime.startsWith('image/')) mediaType = 'image';
-          else if (mime.startsWith('video/')) mediaType = 'video';
+        // Ejecutar la acción seleccionada
+        dynamic pick;
 
-          // Saca la extensión: primero por nombre, si no, por MIME
-          String ext = '';
+        switch (action) {
+          case _PickAction.cameraPhoto:
+            pick = await webio.capturePhotoWeb();
+            break;
+          case _PickAction.recordVideo:
+            pick = await webio.captureVideoWeb();
+            break;
+          case _PickAction.gallery:
+            pick = await webio.pickAnyFileWeb();
+            break;
+        }
+        if (pick == null) return;
+
+        String mime = pick.mime;
+        final lowerName = pick.filename.toLowerCase();
+
+        if (mime == 'application/octet-stream' || mime.isEmpty) {
+          if (lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg')) mime = 'image/jpeg';
+          else if (lowerName.endsWith('.png')) mime = 'image/png';
+          else if (lowerName.endsWith('.webp')) mime = 'image/webp';
+          else if (lowerName.endsWith('.mp4')) mime = 'video/mp4';
+          else if (lowerName.endsWith('.mov')) mime = 'video/quicktime';
+          else if (lowerName.endsWith('.webm')) mime = 'video/webm';
+        }
+
+        final mediaType = mime.startsWith('image/') ? 'image'
+                        : mime.startsWith('video/') ? 'video'
+                        : 'file';
+
+        String ext;
+        if (mime == 'image/jpeg') ext = 'jpg';
+        else if (mime == 'image/png') ext = 'png';
+        else if (mime == 'image/webp') ext = 'webp';
+        else if (mime == 'video/mp4') ext = 'mp4';
+        else if (mime == 'video/quicktime') ext = 'mov';
+        else if (mime == 'video/webm') ext = 'webm';
+        else {
           final dot = lowerName.lastIndexOf('.');
-          if (dot != -1 && dot < lowerName.length - 1) {
-            ext = lowerName.substring(dot + 1);
-          }
-          if (ext.isEmpty) {
-            // fallback por MIME
-            if (mime == 'image/jpeg') ext = 'jpg';
-            else if (mime == 'image/png') ext = 'png';
-            else if (mime == 'image/webp') ext = 'webp';
-            else if (mime == 'image/heic') ext = 'heic';
-            else if (mime == 'video/mp4') ext = 'mp4';
-            else if (mime == 'video/quicktime') ext = 'mov';
-            else if (mime == 'video/webm') ext = 'webm';
-            else ext = 'bin';
-          }
+          ext = (dot != -1) ? lowerName.substring(dot + 1) : 'bin';
+        }
 
-          final uid = c.service.userUid ?? FirebaseAuth.instance.currentUser?.uid;
-          if (uid == null) {
-            Get.snackbar('Sesión', 'Debes iniciar sesión');
-            return;
-          }
+        final storagePath = 'uploads/groups/${c.groupId}/bases/$folderBase/${ts}_$uid.$ext';
 
-          final ts = DateTime.now().millisecondsSinceEpoch;
-          final folderBase = c.baseIndex == null ? 'general' : '${c.baseIndex}';
-          final storagePath = 'uploads/groups/${c.groupId}/bases/$folderBase/${ts}_$uid.$ext';
-
+        await _withProgress(context, () async {
           final ref = FirebaseStorage.instance.ref(storagePath);
           await ref.putData(pick.bytes, SettableMetadata(contentType: mime));
           final url = await ref.getDownloadURL();
 
           await FirebaseFirestore.instance
-              .collection('groups')
-              .doc(c.groupId)
+              .collection('groups').doc(c.groupId)
               .collection('media')
               .add({
             'groupId': c.groupId,
             'baseIndex': c.baseIndex,
             'ownerUid': uid,
-            'type': mediaType,          // ⬅️ 'image' o 'video' según MIME real
+            'type': mediaType,
             'storagePath': storagePath,
             'downloadURL': url,
             'contentType': mime,
             'ext': ext,
             'createdAt': FieldValue.serverTimestamp(),
           });
-        });
+        }, text: 'Subiendo ${mediaType == 'image' ? 'foto' : 'vídeo'}…');
 
         await c.loadInitial();
-        Get.snackbar('Listo', 'Contenido subido', snackPosition: SnackPosition.BOTTOM);
+        Get.snackbar('Listo', mediaType == 'image' ? 'Foto subida' : 'Vídeo subido',
+            snackPosition: SnackPosition.BOTTOM);
       } catch (e) {
         Get.snackbar('Error', e.toString(), snackPosition: SnackPosition.BOTTOM);
       }
+
       return;
     }
+
 
 
 
@@ -387,12 +451,12 @@ class GaleriaScreen extends StatelessWidget {
             ListTile(
               leading: const Icon(Icons.photo_library),
               title: const Text('Foto (galería)'),
-              onTap: () => Navigator.pop(ctx, _PickAction.galleryPhoto),
+              onTap: () => Navigator.pop(ctx, _PickAction.gallery),
             ),
             ListTile(
               leading: const Icon(Icons.videocam),
               title: const Text('Vídeo (galería)'),
-              onTap: () => Navigator.pop(ctx, _PickAction.galleryVideo),
+              onTap: () => Navigator.pop(ctx, _PickAction.recordVideo),
             ),
           ],
         ),
@@ -414,7 +478,7 @@ class GaleriaScreen extends StatelessWidget {
           break;
         }
 
-        case _PickAction.galleryPhoto: {
+        case _PickAction.gallery: {
           final x = await picker.pickImage(source: ImageSource.gallery);
           if (x == null) return;
           final file = File(x.path);
@@ -423,7 +487,7 @@ class GaleriaScreen extends StatelessWidget {
           break;
         }
 
-        case _PickAction.galleryVideo: {
+        case _PickAction.recordVideo: {
           final x = await picker.pickVideo(source: ImageSource.gallery);
           if (x == null) return;
           final file = File(x.path);
@@ -537,71 +601,40 @@ class GaleriaScreen extends StatelessWidget {
       Get.dialog(
         WillPopScope(
           onWillPop: () async => false,
-          child: Stack(
-            children: [
-              // Fondo a pantalla completa (mismo degradado que la app)
-              Positioned.fill(
-                child: Container(
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Color.fromARGB(255, 86, 212, 143),
-                        Color.fromARGB(255, 48, 143, 106),
-                        Color.fromARGB(255, 19, 64, 42),
-                      ],
+          child: Center(
+            child: Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                // Tarjeta con color más vivo, no negro puro
+                color: const Color(0xFF0F2A33), // azul verdoso oscuro
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: const [BoxShadow(blurRadius: 12, color: Colors.black54)],
+                border: Border.all(color: const Color(0xFF00E5FF), width: 1), // borde cian
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(
+                    width: 28, height: 28,
+                    child: CircularProgressIndicator(strokeWidth: 3, color: Colors.white),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    text, // <-- ya no es const
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
-                ),
+                ],
               ),
-              // Blur sutil para separar el HUD del fondo
-              Positioned.fill(
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 2.5, sigmaY: 2.5),
-                  child: const SizedBox.expand(),
-                ),
-              ),
-              // Tarjeta centrada
-              Center(
-                child: Container(
-                  padding: const EdgeInsets.all(18),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.75),
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: const [
-                      BoxShadow(blurRadius: 12, color: Colors.black54),
-                    ],
-                    border: Border.all(color: Colors.white10),
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const SizedBox(
-                        width: 28, height: 28,
-                        child: CircularProgressIndicator(strokeWidth: 3),
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        text, // ⬅️ ahora respeta el parámetro
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
+            ),
           ),
         ),
         barrierDismissible: false,
-        barrierColor: Colors
-            .transparent, // ⬅️ sin velo negro por encima del fondo
+        barrierColor: Colors.black.withOpacity(0.4), // <-- apaga el fondo con transparencia
       );
-
       try {
         final r = await task();
         return r;
@@ -611,7 +644,8 @@ class GaleriaScreen extends StatelessWidget {
     }
 
 
+
 }
 
-enum _PickAction { cameraPhoto, galleryPhoto, galleryVideo }
+enum _PickAction { cameraPhoto, gallery, recordVideo }
 enum _LongPressAction { select, delete }
