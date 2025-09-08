@@ -237,8 +237,8 @@ exports.onChatMessageCreate = onDocumentCreated(
       return all;
     }, []);
     const batches = chunk(destinatarios, 10);
-
-    for (const batch of batches) {
+    /// si no funciona cambiar justo lo de debajo por lo que esta comentado
+    /*for (const batch of batches) {
       const snap = await db.collection("users")
         .where(FieldPath.documentId(), "in", batch) // <<< corregido: usamos FieldPath importado
         .get();
@@ -249,7 +249,28 @@ exports.onChatMessageCreate = onDocumentCreated(
           tokens.push(...fcmTokens.filter(Boolean));
         }
       });
-    }
+    }*/
+   for (const batch of batches) {
+    const snap = await db.collection("users")
+      .where(FieldPath.documentId(), "in", batch)
+      .get();
+
+    snap.forEach((doc) => {
+      const userData = doc.data() || {};
+
+      // 👇 Aseguramos comparar el rol SOLO si corresponde al mismo grupo
+      const sameGroup =
+        String(userData.groupId || userData.groupRefId || "") === String(groupId);
+      const role = (userData.role || "").toLowerCase();
+
+      // ❌ EXCLUIR novio del chat (pero solo si es novio de ESTE grupo)
+      if (sameGroup && role === "novio") return;
+
+      const fcmTokens = Array.isArray(userData.fcmTokens) ? userData.fcmTokens : [];
+      tokens.push(...fcmTokens.filter(Boolean));
+    });
+  }
+
 
     if (!tokens.length) return;
 

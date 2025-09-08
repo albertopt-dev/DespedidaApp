@@ -17,6 +17,17 @@ class CamaraScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (grupoId.trim().isEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Get.snackbar('Error', 'groupId vacío (navegación incorrecta)');
+        Get.back();
+      });
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+
     final controller = Get.put(
       CamaraController(groupId: grupoId, baseIndex: baseIndex),
     );
@@ -145,7 +156,7 @@ class CamaraScreen extends StatelessWidget {
           // Overlay de subida (cuando isUploading = true)
           Obx(() => controller.isUploading.value
             ? Container(
-                color: const Color.fromARGB(223, 151, 255, 82),
+                color: const Color.fromARGB(223, 189, 255, 145),
                 alignment: Alignment.center,
                 child: Container(
                   width: 300,

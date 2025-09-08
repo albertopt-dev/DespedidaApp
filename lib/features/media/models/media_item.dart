@@ -13,6 +13,10 @@ class MediaItem {
   final String? thumbnailURL;
   final num? durationSec;
 
+  // 👇 NUEVO
+  final String? contentType; // p.ej. "image/heic", "image/jpeg", "video/mp4"
+  final String? ext;         // p.ej. "heic", "jpg", "mp4"
+
   MediaItem({
     required this.id,
     required this.groupId,
@@ -24,7 +28,27 @@ class MediaItem {
     required this.createdAt,
     this.thumbnailURL,
     this.durationSec,
+    this.contentType, // nuevo
+    this.ext,         // nuevo
   });
+
+  // Helpers
+  bool get isImage => type == 'image';
+  bool get isVideo => type == 'video';
+  bool get isHeicLike {
+    final ct = (contentType ?? '').toLowerCase();
+    final e = (ext ?? '').toLowerCase();
+    return ct.contains('heic') || ct.contains('heif') || e == 'heic' || e == 'heif';
+  }
+
+  // Fecha formateada (versión simple)
+  String get createdAtFormatted {
+    try {
+      return DateFormat('dd/MM HH:mm').format(createdAt);
+    } catch (_) {
+      return '';
+    }
+  }
 
   factory MediaItem.fromDoc(String id, Map<String, dynamic> d) {
     return MediaItem(
@@ -38,6 +62,9 @@ class MediaItem {
       createdAt: (d['createdAt'] as Timestamp).toDate(),
       thumbnailURL: d['thumbnailURL'],
       durationSec: d['durationSec'],
+      // 👇 lee lo que ya guardas en Firestore
+      contentType: d['contentType'],
+      ext: d['ext'],
     );
   }
 
@@ -51,13 +78,7 @@ class MediaItem {
         'createdAt': Timestamp.fromDate(createdAt),
         if (thumbnailURL != null) 'thumbnailURL': thumbnailURL,
         if (durationSec != null) 'durationSec': durationSec,
+        if (contentType != null) 'contentType': contentType, // nuevo
+        if (ext != null) 'ext': ext,                         // nuevo
       };
-}
-
-extension MediaItemFormat on MediaItem {
-  String get createdAtFormatted {
-    final dt = createdAt;
-    // dd/MM/yyyy y HH:mm (24h). Ajusta a tu gusto.
-    return DateFormat('dd/MM/yyyy\nHH:mm').format(dt);
-  }
 }

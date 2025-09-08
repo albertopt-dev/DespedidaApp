@@ -8,10 +8,12 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:file_picker/file_picker.dart';
 import '../models/media_item.dart';
 import 'package:get/get.dart';
+import 'package:video_thumbnail/video_thumbnail.dart';
+import 'dart:typed_data';
+
 // Solo Web
 import 'package:despedida/web/io_stub.dart'
     if (dart.library.html) 'package:despedida/web/io_web.dart' as webio;
-import 'dart:typed_data'; // <- para ByteBuffer / Uint8List
 
 
 /// Excepción para controlar el flujo cuando no cabe en la cuota.
@@ -147,61 +149,101 @@ class GalleryService {
         },
       );
 
-      final task = ref.putFile(uploadFile, metadata);
-
-      await for (final s in task.snapshotEvents) {
-        final prog =
-            s.totalBytes == 0 ? 0.0 : s.bytesTransferred / s.totalBytes;
-        yield (progress: prog, item: null, error: null);
+      // ---------- SUBIDA con fallback ----------
+      UploadTask task;
+      try {
+        // 1) Intento normal: putFile (como ya hacías)
+        task = ref.putFile(uploadFile, metadata);
+        await for (final s in task.snapshotEvents) {
+          final prog = s.totalBytes == 0 ? 0.0 : s.bytesTransferred / s.totalBytes;
+          yield (progress: prog, item: null, error: null);
+        }
+      } on FirebaseException catch (e) {
+        // Algunos dispositivos/ROMs lanzan "invalid-argument" con putFile (paths raros).
+        final isImage = uploadContentType.startsWith('image/');
+        if (isImage) {
+          // 2) Fallback seguro para imágenes: leemos bytes y subimos con putData
+          try {
+            final bytes = await uploadFile.readAsBytes();
+            if (bytes.isEmpty) {
+              yield (progress: 0.0, item: null, error: StateError('Imagen vacía'));
+              return;
+            }
+            task = ref.putData(bytes, metadata);
+            await for (final s in task.snapshotEvents) {
+              final prog = s.totalBytes == 0 ? 0.0 : s.bytesTransferred / s.totalBytes;
+              yield (progress: prog, item: null, error: null);
+            }
+          } catch (e2) {
+            // Si también falla el fallback, devuelve el error original
+            yield (progress: 0.0, item: null, error: e);
+            return;
+          }
+        } else {
+          // Vídeo u otros tipos: repropaga tal cual
+          yield (progress: 0.0, item: null, error: e);
+          return;
+        }
       }
 
       final downloadURL = await ref.getDownloadURL();
 
-      // Subir thumbnail si lo pasaste (opcional).
-      String? thumbUrl;
-      if (thumbnailPath != null) {
-        final thumbRef = _storage.ref('$storagePath.thumb.jpg');
-        final thumbTask = thumbRef.putFile(
-          File(thumbnailPath),
-          SettableMetadata(contentType: 'image/jpeg'),
-        );
-        await thumbTask;
-        thumbUrl = await thumbRef.getDownloadURL();
+      // AQUÍ VA EL CÓDIGO - justo después de obtener downloadURL y antes de crear el documento
+      String? thumbnailURL;
+      
+      if (contentType.startsWith('video/')) {
+        try {
+          // Generar miniatura (bytes) a partir del archivo local
+          final Uint8List? thumbBytes = await VideoThumbnail.thumbnailData(
+            video: file.path,
+            imageFormat: ImageFormat.JPEG,
+            maxWidth: 480,
+            quality: 70,
+            timeMs: 1000,
+          );
+
+          if (thumbBytes != null && thumbBytes.isNotEmpty) {
+            final String thumbPath = '$storagePath.thumb.jpg';
+            final thumbRef = _storage.ref(thumbPath);
+            await thumbRef.putData(
+              thumbBytes,
+              SettableMetadata(contentType: 'image/jpeg'),
+            );
+            thumbnailURL = await thumbRef.getDownloadURL();
+          }
+        } catch (e) {
+          // Silencioso: no rompemos la subida si falla la miniatura
+        }
       }
 
       final docRef = await _mediaCol(groupId).add({
         'groupId': groupId,
         'baseIndex': baseIndex,
         'ownerUid': uid,
-        'type':
-            uploadContentType.startsWith('video/') ? 'video' : 'image',
+        'type': contentType.startsWith('video/') ? 'video' : 'image',
         'storagePath': storagePath,
         'downloadURL': downloadURL,
+        'thumbnailURL': thumbnailURL, // <- Añadido aquí
         'createdAt': FieldValue.serverTimestamp(),
-        if (thumbUrl != null) 'thumbnailURL': thumbUrl,
         if (videoDuration != null) 'durationSec': videoDuration,
-        'contentType': uploadContentType,
+        'contentType': contentType,
         'ext': ext,
-
       });
 
-      // Leer createdAt server y construir modelo
       final snap = await docRef.get();
       final item = MediaItem.fromDoc(snap.id, snap.data()!);
       yield (progress: 1.0, item: item, error: null);
+
     } on FirebaseException catch (e) {
       if (e.code == 'permission-denied') {
-        yield (
-          progress: 0.0,
-          item: null,
-          error: GalleryQuotaExceeded('Nube llena o vídeo > 30s'),
-        );
+        yield (progress: 0.0, item: null, error: GalleryQuotaExceeded('Nube llena o vídeo > 30s'));
       } else {
         yield (progress: 0.0, item: null, error: e);
       }
     } catch (e) {
       yield (progress: 0.0, item: null, error: e);
     }
+
   }
 
   /// Listado paginado por grupo y base (null = general).
@@ -291,7 +333,7 @@ class GalleryService {
       allowMultiple: false,
       withData: true, // necesitamos bytes en memoria
       type: FileType.custom,
-      allowedExtensions: ['jpg', 'jpeg', 'png', 'webp', 'mp4', 'mov', 'webm'],
+      allowedExtensions: ['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif', 'mp4', 'mov', 'webm'],
     );
 
     if (result == null || result.files.isEmpty) return;
@@ -319,6 +361,9 @@ class GalleryService {
       ext = 'png'; contentType = 'image/png'; mediaType = 'image';
     } else if (name.endsWith('.webp')) {
       ext = 'webp'; contentType = 'image/webp'; mediaType = 'image';
+    } else if (name.endsWith('.heic') || name.endsWith('.heif')) {
+      ext = name.endsWith('.heif') ? 'heif' : 'heic';
+      contentType = 'image/heic'; mediaType = 'image';
     } else if (name.endsWith('.webm')) {
       ext = 'webm'; contentType = 'video/webm'; mediaType = 'video';
     } else if (name.endsWith('.mp4')) {

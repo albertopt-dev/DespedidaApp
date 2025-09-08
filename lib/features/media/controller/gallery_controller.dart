@@ -49,14 +49,28 @@ class GalleryController extends GetxController {
   // Carga / paginación
   // ======================
   Future<void> loadInitial() async {
-    isLoading.value = true;
-    _lastDoc = null;
-    _hasMore = true;
-    items.clear();
-    await loadMore();
-    isLoading.value = false;
+    try {
+      isLoading.value = true;
+      items.clear();
+      
+      final snapshot = await FirebaseFirestore.instance
+          .collection('groups')
+          .doc(groupId)
+          .collection('media')
+          .orderBy('createdAt', descending: true)
+          .limit(20)
+          .get();
+          
+      items.addAll(
+        snapshot.docs.map((d) => MediaItem.fromDoc(d.id, d.data())),
+      );
+    } catch (e) {
+      print('Error cargando galería: $e');
+    } finally {
+      isLoading.value = false;
+    }
   }
-
+  
   Future<void> loadMore() async {
     if (!_hasMore) return;
     final res = await service.list(

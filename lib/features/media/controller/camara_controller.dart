@@ -9,17 +9,31 @@ import 'package:despedida/features/media/controller/gallery_controller.dart';
 import 'package:despedida/features/media/services/gallery_service.dart';
 import 'package:despedida/web/io_stub.dart'
   if (dart.library.html) 'package:despedida/web/io_web.dart' as webio;
+  import 'package:despedida/web/mime_detector.dart';
+
+import 'package:media_scanner/media_scanner.dart';
+import 'package:gal/gal.dart'; // <- FALTABA
+
+import 'package:flutter/material.dart'; // para Get.dialog y widgets
+
+
+
 
 class CamaraController extends GetxController {
   final String groupId;
   final int? baseIndex;
 
-  CamaraController({required this.groupId, this.baseIndex});
+  CamaraController({required this.groupId, this.baseIndex})
+  : assert(groupId.isNotEmpty, 'groupId no puede ser vacío');
 
   final picker = ImagePicker();
 
   final isUploading = false.obs;
   final uploadProgress = 0.0.obs;
+
+  
+
+  // ============================================================
 
   /// Pedir permisos de cámara/galería
   Future<void> pedirPermisos() async {
@@ -35,12 +49,19 @@ class CamaraController extends GetxController {
         ? Get.find<GalleryController>(tag: tag)
         : null;
 
+    bool hadError = false; // <-- NUEVO
+
     if (galleryCtrl != null) {
       // 🚀 Subida usando la galería activa
-      await galleryCtrl.uploadFile(
-        file: File(file.path),
-        contentType: contentType,
-      );
+      try {
+        await galleryCtrl.uploadFile(
+          file: File(file.path),
+          contentType: contentType,
+        );
+      } catch (e) {
+        hadError = true;
+        Get.snackbar("Error", e.toString());
+      }
     } else {
       // fallback: subida directa con GalleryService
       await for (final event in GalleryService().upload(
@@ -50,6 +71,7 @@ class CamaraController extends GetxController {
         contentType: contentType,
       )) {
         if (event.error != null) {
+          hadError = true; // <-- NUEVO
           Get.snackbar("Error", event.error.toString());
           break;
         }
@@ -57,108 +79,75 @@ class CamaraController extends GetxController {
       }
     }
 
-    Get.snackbar("Éxito", "Archivo subido correctamente");
+    // ⬇️ Mostrar éxito y guardar en galería SOLO si NO hubo error
+    if (!hadError) {
+      Get.snackbar("Éxito", "Archivo subido correctamente");
+
+      // Guardar también en la galería del dispositivo (Android)
+      try {
+        if (contentType.startsWith('video/')) {
+          await Gal.putVideo(file.path);
+        } else if (contentType.startsWith('image/')) {
+          await Gal.putImage(file.path);
+        }
+        final savedPath = file.path;
+        await MediaScanner.loadMedia(path: savedPath); // o MediaScanner.scanFile(savedPath)
+      } catch (_) {
+        // Silencioso: no rompas UX si MediaStore falla
+      }
+    }
   }
+
 
   /// Tomar foto
   Future<void> tomarFoto() async {
+    await pedirPermisos();
     final imagen = await picker.pickImage(source: ImageSource.camera);
     if (imagen != null) {
-      await _subirArchivo(imagen, "image/jpeg");
+      uploadProgress.value = 0.0;
+      isUploading.value    = true;
+      try {
+        await _subirArchivo(imagen, "image/jpeg");
+      } finally {
+        isUploading.value    = false;
+        uploadProgress.value = 0.0;
+      }
     }
+
   }
 
   /// Grabar vídeo
   Future<void> grabarVideo() async {
+    await pedirPermisos();
     final video = await picker.pickVideo(source: ImageSource.camera);
     if (video != null) {
-      await _subirArchivo(video, "video/mp4");
+      uploadProgress.value = 0.0;
+      isUploading.value    = true;
+      try {
+        await _subirArchivo(video, "video/mp4");
+      } finally {
+        isUploading.value    = false;
+        uploadProgress.value = 0.0;
+      }
     }
+
   }
 
     // ------ WEB ------
-    // FOTO WEB
-    Future<void> capturarFotoWeb() async {
-      if (!kIsWeb) return;
-      try {
-        final pick = await webio.capturePhotoWeb();
-        if (pick == null) return;
-
-        var mime = pick.mime;
-        final n = pick.filename.toLowerCase();
-        if (mime.isEmpty || mime == 'application/octet-stream') {
-          if (n.endsWith('.jpg') || n.endsWith('.jpeg')) mime = 'image/jpeg';
-          else if (n.endsWith('.png')) mime = 'image/png';
-          else if (n.endsWith('.webp')) mime = 'image/webp';
-          else if (n.endsWith('.heic') || n.endsWith('.heif')) mime = 'image/heic';
-        }
-
-        print('[WEB] capturarFotoWeb pick: name=${pick.filename} mime=$mime bytes=${pick.bytes.length}');
-
-        final uid = FirebaseAuth.instance.currentUser?.uid;
-        if (uid == null) {
-          Get.snackbar('Sesión', 'Debes iniciar sesión');
-          return;
-        }
-
-        isUploading.value = true;
-        uploadProgress.value = 0;
-        await Future<void>.delayed(const Duration(milliseconds: 16));
-
-        final uploadFuture = GalleryService().uploadBytesWeb(
-          groupId: groupId,
-          baseIndex: baseIndex,
-          bytes: pick.bytes,
-          filename: pick.filename,
-          mime: mime,
-          onProgress: (p) {
-            uploadProgress.value = p;
-            if (p == 0 || p == 1) {
-              print('[WEB] foto progreso ${(p * 100).toStringAsFixed(0)}%');
-            }
-          },
-        );
-
-        // 60s watchdog
-        await uploadFuture.timeout(const Duration(seconds: 60), onTimeout: () {
-          print('[WEB] upload TIMEOUT');
-          Get.snackbar('Red lenta', 'La subida está tardando demasiado. Reintenta.');
-          // No lanzamos excepción: retornamos para salir y cerrar overlay en finally
-          return;
-        });
-
-        final tag = 'gallery-$groupId-$baseIndex';
-        if (Get.isRegistered<GalleryController>(tag: tag)) {
-          await Get.find<GalleryController>(tag: tag).loadInitial();
-        }
-
-        Get.snackbar('Listo', 'Foto subida');
-      } catch (e, st) {
-        print('[WEB] capturarFotoWeb ERROR: $e\n$st');
-        Get.snackbar('Error', e.toString());
-      } finally {
-        isUploading.value = false;
-        uploadProgress.value = 0;
-      }
-    }
-
-
-  // VÍDEO WEB
-  Future<void> capturarVideoWeb() async {
+   // FOTO WEB
+  Future<void> capturarFotoWeb() async {
     if (!kIsWeb) return;
     try {
-      final pick = await webio.captureVideoWeb();
+      final pick = await webio.capturePhotoWeb();
       if (pick == null) return;
 
-      var mime = pick.mime;
-      final n = pick.filename.toLowerCase();
-      if (mime.isEmpty || mime == 'application/octet-stream') {
-        if (n.endsWith('.webm')) mime = 'video/webm';
-        else if (n.endsWith('.mov')) mime = 'video/quicktime';
-        else mime = 'video/mp4';
-      }
+      final mime = DetectorMimeSafari.detectarTipoMime(
+        nombreArchivo: pick.filename,
+        mimeOriginal: pick.mime,
+        bytes: pick.bytes,
+      );
 
-      print('[WEB] capturarVideoWeb pick: name=${pick.filename} mime=$mime bytes=${pick.bytes.length}');
+      print('[WEB] capturarFotoWeb name=${pick.filename} mimeOrig=${pick.mime} mimeDet=$mime bytes=${pick.bytes.length}');
 
       final uid = FirebaseAuth.instance.currentUser?.uid;
       if (uid == null) {
@@ -170,25 +159,64 @@ class CamaraController extends GetxController {
       uploadProgress.value = 0;
       await Future<void>.delayed(const Duration(milliseconds: 16));
 
-      final uploadFuture = GalleryService().uploadBytesWeb(
+      await GalleryService().uploadBytesWeb(
         groupId: groupId,
         baseIndex: baseIndex,
         bytes: pick.bytes,
         filename: pick.filename,
         mime: mime,
-        onProgress: (p) {
-          uploadProgress.value = p;
-          if (p == 0 || p == 1) {
-            print('[WEB] video progreso ${(p * 100).toStringAsFixed(0)}%');
-          }
-        },
+        onProgress: (p) => uploadProgress.value = p,
       );
 
-      await uploadFuture.timeout(const Duration(seconds: 60), onTimeout: () {
-        print('[WEB] upload TIMEOUT');
-        Get.snackbar('Red lenta', 'La subida está tardando demasiado. Reintenta.');
+      final tag = 'gallery-$groupId-$baseIndex';
+      if (Get.isRegistered<GalleryController>(tag: tag)) {
+        await Get.find<GalleryController>(tag: tag).loadInitial();
+      }
+
+      Get.snackbar('Listo', 'Foto subida');
+    } catch (e, st) {
+      print('[WEB] capturarFotoWeb ERROR: $e\n$st');
+      Get.snackbar('Error', e.toString());
+    } finally {
+      isUploading.value = false;
+      uploadProgress.value = 0;
+    }
+  }
+
+
+  // VÍDEO WEB
+  Future<void> capturarVideoWeb() async {
+    if (!kIsWeb) return;
+    try {
+      final pick = await webio.captureVideoWeb();
+      if (pick == null) return;
+
+      final mime = DetectorMimeSafari.detectarTipoMime(
+        nombreArchivo: pick.filename,
+        mimeOriginal: pick.mime,
+        bytes: pick.bytes,
+      );
+
+      print('[WEB] capturarVideoWeb name=${pick.filename} mimeOrig=${pick.mime} mimeDet=$mime bytes=${pick.bytes.length}');
+
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) {
+        Get.snackbar('Sesión', 'Debes iniciar sesión');
         return;
-      });
+      }
+
+      isUploading.value = true;
+      uploadProgress.value = 0;
+      await Future<void>.delayed(const Duration(milliseconds: 16));
+
+      await GalleryService().uploadBytesWeb(
+        groupId: groupId,
+        baseIndex: baseIndex,
+        bytes: pick.bytes,
+        filename: pick.filename,
+        mime: mime,
+        onProgress: (p) => uploadProgress.value = p,
+      );
 
       final tag = 'gallery-$groupId-$baseIndex';
       if (Get.isRegistered<GalleryController>(tag: tag)) {
@@ -205,6 +233,7 @@ class CamaraController extends GetxController {
     }
   }
 
+
   // DESDE GALERÍA WEB
   Future<void> pickDesdeGaleriaWeb() async {
     if (!kIsWeb) return;
@@ -212,19 +241,13 @@ class CamaraController extends GetxController {
       final pick = await webio.pickAnyFileWeb();
       if (pick == null) return;
 
-      var mime = pick.mime;
-      final n = pick.filename.toLowerCase();
-      if (mime.isEmpty || mime == 'application/octet-stream') {
-        if (n.endsWith('.jpg') || n.endsWith('.jpeg')) mime = 'image/jpeg';
-        else if (n.endsWith('.png')) mime = 'image/png';
-        else if (n.endsWith('.webp')) mime = 'image/webp';
-        else if (n.endsWith('.webm')) mime = 'video/webm';
-        else if (n.endsWith('.mov')) mime = 'video/quicktime';
-        else if (n.endsWith('.mp4')) mime = 'video/mp4';
-        else if (n.endsWith('.heic') || n.endsWith('.heif')) mime = 'image/heic';
-      }
+      final mime = DetectorMimeSafari.detectarTipoMime(
+        nombreArchivo: pick.filename,
+        mimeOriginal: pick.mime,
+        bytes: pick.bytes,
+      );
 
-      print('[WEB] pickDesdeGaleriaWeb pick: name=${pick.filename} mime=$mime bytes=${pick.bytes.length}');
+      print('[WEB] pickDesdeGaleriaWeb name=${pick.filename} mimeOrig=${pick.mime} mimeDet=$mime bytes=${pick.bytes.length}');
 
       final uid = FirebaseAuth.instance.currentUser?.uid;
       if (uid == null) {
@@ -236,25 +259,14 @@ class CamaraController extends GetxController {
       uploadProgress.value = 0;
       await Future<void>.delayed(const Duration(milliseconds: 16));
 
-      final uploadFuture = GalleryService().uploadBytesWeb(
+      await GalleryService().uploadBytesWeb(
         groupId: groupId,
         baseIndex: baseIndex,
         bytes: pick.bytes,
         filename: pick.filename,
         mime: mime,
-        onProgress: (p) {
-          uploadProgress.value = p;
-          if (p == 0 || p == 1) {
-            print('[WEB] galería progreso ${(p * 100).toStringAsFixed(0)}%');
-          }
-        },
+        onProgress: (p) => uploadProgress.value = p,
       );
-
-      await uploadFuture.timeout(const Duration(seconds: 60), onTimeout: () {
-        print('[WEB] upload TIMEOUT');
-        Get.snackbar('Red lenta', 'La subida está tardando demasiado. Reintenta.');
-        return;
-      });
 
       final tag = 'gallery-$groupId-$baseIndex';
       if (Get.isRegistered<GalleryController>(tag: tag)) {

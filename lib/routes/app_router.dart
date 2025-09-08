@@ -58,6 +58,7 @@ class AppRoutes {
       name: galeria,
       page: () => GaleriaScreen(),
     ),
+    
     GetPage(
       name: camara,
       page: () {
@@ -68,12 +69,17 @@ class AppRoutes {
               )
             : const <String, dynamic>{};
 
-        final String groupId = (args['groupId'] ?? '') as String;
-        final int? baseIndex = args['baseIndex'] is int
-            ? args['baseIndex'] as int
-            : int.tryParse('${args['baseIndex']}');
+        final params = Map<String, String>.from(Get.parameters);
 
-        return CamaraScreen(grupoId: groupId, baseIndex: baseIndex);
+        final String groupId = ((args['groupId'] as String?) ?? params['groupId'] ?? '').trim();
+
+        final dynamic b = args['baseIndex'] ?? params['baseIndex'];
+        final int? baseIndex = (b is int) ? b : int.tryParse('$b');
+
+        return CamaraScreen(
+          grupoId: groupId,
+          baseIndex: baseIndex,
+        );
       },
     ),
 
@@ -109,6 +115,12 @@ class AppRoutes {
         return WebVideoRecorderPage(groupId: groupId, baseIndex: baseIndex);
       },
     ),
+
+    GetPage(
+      name: galeria,
+      page: () => GaleriaScreen(),
+    ),
+
 
   ];
 }

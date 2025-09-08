@@ -1,6 +1,8 @@
 import 'dart:io';
+import 'dart:ui';
+
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:cached_network_image_platform_interface/cached_network_image_platform_interface.dart'; // <- Añade esta línea
+import 'package:cached_network_image_platform_interface/cached_network_image_platform_interface.dart';
 import 'package:flutter/material.dart';
 import 'package:gal/gal.dart';
 import 'package:get/get.dart';
@@ -8,23 +10,28 @@ import 'package:image_picker/image_picker.dart';
 import 'package:mime/mime.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+
 import '../controller/gallery_controller.dart';
 import '../models/media_item.dart';
 import '../widgets/media_detail_view.dart';
+
 import 'package:despedida/web/io_stub.dart'
-    if (dart.library.html) 'package:despedida/web/io_web.dart' as webio;
+  if (dart.library.html) 'package:despedida/web/io_web.dart' as webio;
+
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'dart:ui';  
+
+import 'package:despedida/web/mime_detector.dart';
 
 class GaleriaScreen extends StatelessWidget {
   GaleriaScreen({super.key});
 
-  final picker = ImagePicker(); // <- Añade esta línea
+  final picker = ImagePicker();
 
   @override
   Widget build(BuildContext context) {
+    // === Lectura robusta de args (Get.arguments) + params (Get.parameters) ===
     final raw = Get.arguments;
     final Map<String, dynamic> args = (raw is Map)
         ? Map<String, dynamic>.from(
@@ -32,13 +39,22 @@ class GaleriaScreen extends StatelessWidget {
           )
         : const <String, dynamic>{};
 
-    final String groupId = (args['groupId'] ?? '') as String;
-    final int? baseIndex = args['baseIndex'] is int
-        ? args['baseIndex'] as int
-        : int.tryParse('${args['baseIndex']}');
+    final params = Get.parameters;
 
+    final String groupId =
+        ((args['groupId'] as String?) ?? params['groupId'] ?? '').trim();
 
-    // Tag único por grupo+base para poder encontrar el controller desde /camara si hace falta.
+    final dynamic b = args['baseIndex'] ?? params['baseIndex'];
+    final int? baseIndex = (b is int) ? b : int.tryParse('$b');
+
+    if (groupId.isEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Get.snackbar('Error', 'groupId vacío (navegación incorrecta)');
+        Get.back();
+      });
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
     final tag = 'gallery-$groupId-$baseIndex';
 
     final c = Get.put(
@@ -56,25 +72,22 @@ class GaleriaScreen extends StatelessWidget {
           return AppBar(
             centerTitle: true,
             elevation: 0,
-            backgroundColor: const Color(0xFF0D1B1E), // mismo tono que la pantalla de cámara
+            backgroundColor: const Color(0xFF0D1B1E),
             foregroundColor: Colors.white,
-            iconTheme: const IconThemeData(color: Colors.blue), // ← back arrow azul
-
+            iconTheme: const IconThemeData(color: Colors.blue),
             leading: selecting
                 ? IconButton(
-                    icon: const Icon(Icons.close, color: Colors.blue), // ← también azul cuando hay selección
+                    icon: const Icon(Icons.close, color: Colors.blue),
                     onPressed: c.clearSelection,
                   )
                 : null,
-
             title: selecting
                 ? Text('$count seleccionados')
                 : Text(baseIndex == null ? 'Galería' : 'Base ${baseIndex + 1}'),
-
             actions: [
               if (!selecting)
                 IconButton(
-                  icon: const Icon(Icons.refresh, color: Colors.green), // ← refresh verde
+                  icon: const Icon(Icons.refresh, color: Colors.green),
                   onPressed: c.loadInitial,
                 )
               else ...[
@@ -83,8 +96,6 @@ class GaleriaScreen extends StatelessWidget {
                   icon: const Icon(Icons.download),
                   onPressed: c.bulkWorking.value ? null : c.downloadSelected,
                 ),
-
-                
                 IconButton(
                   tooltip: 'Eliminar selección',
                   icon: const Icon(Icons.delete_outline, color: Colors.red),
@@ -98,183 +109,87 @@ class GaleriaScreen extends StatelessWidget {
           );
         }),
       ),
-
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Color(0xFF0D1B1E),
-              Color(0xFF102A30),
-              Color(0xFF133940),
-            ],
-          ),
-        ),
-        child: Obx(() {
-          if (c.isLoading.value && c.items.isEmpty) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (c.items.isEmpty) {
-            // ← para que se lea sobre fondo oscuro
-            return const Center(
-              child: Text('Sin contenido', style: TextStyle(color: Colors.white70)),
-            );
-          }
-          return Stack(
-            children: [
-              NotificationListener<ScrollNotification>(
-                onNotification: (n) {
-                  if (n.metrics.pixels > n.metrics.maxScrollExtent - 300) {
-                    c.loadMore();
-                  }
-                  return false;
-                },
-                child: GridView.builder(
-                  padding: const EdgeInsets.all(8),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3,
-                    mainAxisSpacing: 4,
-                    crossAxisSpacing: 4,
-                    childAspectRatio: 1,
-                  ),
-                  itemCount: c.items.length,
-                  itemBuilder: (context, i) {
-                    final item = c.items[i];
-                    final thumb = item.thumbnailURL ?? item.downloadURL;
-                    final isSelected = c.selectedIds.contains(item.id);
-
-                    return GestureDetector(
-                      onLongPress: () async {
-                        if (c.isSelectionMode.value) {
-                          c.toggleSelection(item.id);
-                        } else {
-                          final action = await showModalBottomSheet<_LongPressAction>(
-                            context: context,
-                            builder: (ctx) => SafeArea(
-                              child: Wrap(
-                                children: [
-                                  ListTile(
-                                    leading: const Icon(Icons.check_circle_outline),
-                                    title: const Text('Seleccionar'),
-                                    onTap: () => Navigator.pop(ctx, _LongPressAction.select),
-                                  ),
-                                  ListTile(
-                                    leading: const Icon(Icons.delete_outline),
-                                    title: const Text('Borrar'),
-                                    onTap: () => Navigator.pop(ctx, _LongPressAction.delete),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          );
-                          if (action == _LongPressAction.select) {
-                            c.enterSelection(item.id);
-                          } else if (action == _LongPressAction.delete) {
-                            _confirmDelete(context, c, item);
-                          }
-                        }
-                      },
-                      onTap: () {
-                        if (c.isSelectionMode.value) {
-                          c.toggleSelection(item.id);
-                        } else {
-                          Get.to(
-                            () => MediaDetailView(
-                              items: c.items,
-                              initialIndex: i,
-                              tagBase: tag,
-                            ),
-                          );
-                        }
-                      },
-                      child: Hero(
-                        tag: '$tag-${item.id}',
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            CachedNetworkImage(
-                              imageUrl: thumb,
-                              fit: BoxFit.cover,
-                              imageRenderMethodForWeb: ImageRenderMethodForWeb.HtmlImage, // <- Corregido aquí
-                              placeholder: (ctx, __) => const Center(
-                                child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
-                              ),
-                              errorWidget: (ctx, __, ___) => const ColoredBox(color: Colors.black12),
-                            ),
-
-                            if (item.type == 'video')
-                              const Align(
-                                alignment: Alignment.center,
-                                child: Icon(
-                                  Icons.play_circle_outline_rounded,
-                                  size: 36,
-                                  color: Colors.white,
-                                ),
-                              ),
-
-                            // Añadir aquí la fecha formateada
-                            Positioned(
-                              left: 4,
-                              bottom: 4,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: Colors.black45,
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Text(
-                                  item.createdAtFormatted ?? '',
-                                  style: const TextStyle(
-                                    color: Colors.white70,
-                                    fontSize: 10,
-                                  ),
-                                ),
-                              ),
-                            ),
-
-                            if (isSelected)
-                              Container(
-                                color: Colors.black26,
-                                child: const Align(
-                                  alignment: Alignment.topRight,
-                                  child: Padding(
-                                    padding: EdgeInsets.all(6),
-                                    child: Icon(
-                                      Icons.check_circle,
-                                      color: Colors.lightBlueAccent,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
+      // 👇 Aquí metemos el overlay en un Stack
+      body: Stack(
+        children: [
+          Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Color(0xFF0D1B1E), Color(0xFF102A30), Color(0xFF133940)],
               ),
+            ),
+            child: Obx(() {
+              final items = c.items;
 
-              // Barra de progreso para acciones masivas (descarga/borrado)
-              Obx(() => c.bulkWorking.value
-                  ? Align(
-                      alignment: Alignment.bottomCenter,
-                      child: Padding(
-                        padding: const EdgeInsets.all(12.0),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: LinearProgressIndicator(value: c.bulkProgress.value),
+              if (c.isLoading.value) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (items.isEmpty) {
+                return const Center(child: Text('No hay contenido aún'));
+              }
+
+              return GridView.builder(
+                padding: const EdgeInsets.all(4),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 3,
+                  mainAxisSpacing: 4,
+                  crossAxisSpacing: 4,
+                ),
+                itemCount: items.length,
+                itemBuilder: (_, i) => _buildGridItem(items[i], c),
+              );
+            }),
+          ),
+
+          // --- OVERLAY EXACTO ---
+          Obx(() => c.uploading.value
+              ? Container(
+                  color: const Color.fromARGB(223, 189, 255, 145),
+                  alignment: Alignment.center,
+                  child: Container(
+                    width: 300,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.85),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text(
+                          'Subiendo…',
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold),
                         ),
-                      ),
-                    )
-                  : const SizedBox.shrink()),
-            ],
-          );
-        }),
+                        const SizedBox(height: 12),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: LinearProgressIndicator(
+                            minHeight: 10,
+                            backgroundColor: Colors.white12,
+                            valueColor: const AlwaysStoppedAnimation<Color>(
+                                Color(0xFF00E5FF)),
+                            value: c.uploadProgress.value,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          '${(c.uploadProgress.value * 100).toStringAsFixed(0)}%',
+                          style: const TextStyle(color: Colors.white70),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              : const SizedBox.shrink()),
+        ],
       ),
 
       floatingActionButton: Obx(() {
-        // Ocultar FAB en modo selección
         if (c.isSelectionMode.value) return const SizedBox.shrink();
 
         return Column(
@@ -309,14 +224,15 @@ class GaleriaScreen extends StatelessWidget {
     );
   }
 
-  // --------------------- Subidas ---------------------
+  // ---------- Subidas ----------
   Future<void> _pickAndUpload(
+    
     BuildContext context,
     GalleryController c,
     String tag,
+    
   ) async {
-    // ------ WEB (Safari/Chrome/Firefox) ------
-      if (kIsWeb) {
+    if (kIsWeb) {
       final action = await showModalBottomSheet<_PickAction>(
         context: context,
         builder: (ctx) => SafeArea(
@@ -341,101 +257,93 @@ class GaleriaScreen extends StatelessWidget {
           ),
         ),
       );
-
       if (action == null) return;
 
-      try {
-        final uid = c.service.userUid ?? FirebaseAuth.instance.currentUser?.uid;
-        if (uid == null) {
-          Get.snackbar('Sesión', 'Debes iniciar sesión');
-          return;
-        }
+      // Log útil
+      // ignore: avoid_print
+      print(
+          '[WEB] _pickAndUpload: groupId=${c.groupId} baseIndex=${c.baseIndex} action=$action');
 
-        final ts = DateTime.now().millisecondsSinceEpoch;
-        final folderBase = c.baseIndex == null ? 'general' : '${c.baseIndex}';
-
-        // Ejecutar la acción seleccionada
-        dynamic pick;
-
-        switch (action) {
-          case _PickAction.cameraPhoto:
-            pick = await webio.capturePhotoWeb();
-            break;
-          case _PickAction.recordVideo:
-            pick = await webio.captureVideoWeb();
-            break;
-          case _PickAction.gallery:
-            pick = await webio.pickAnyFileWeb();
-            break;
-        }
-        if (pick == null) return;
-
-        String mime = pick.mime;
-        final lowerName = pick.filename.toLowerCase();
-
-        if (mime == 'application/octet-stream' || mime.isEmpty) {
-          if (lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg')) mime = 'image/jpeg';
-          else if (lowerName.endsWith('.png')) mime = 'image/png';
-          else if (lowerName.endsWith('.webp')) mime = 'image/webp';
-          else if (lowerName.endsWith('.mp4')) mime = 'video/mp4';
-          else if (lowerName.endsWith('.mov')) mime = 'video/quicktime';
-          else if (lowerName.endsWith('.webm')) mime = 'video/webm';
-        }
-
-        final mediaType = mime.startsWith('image/') ? 'image'
-                        : mime.startsWith('video/') ? 'video'
-                        : 'file';
-
-        String ext;
-        if (mime == 'image/jpeg') ext = 'jpg';
-        else if (mime == 'image/png') ext = 'png';
-        else if (mime == 'image/webp') ext = 'webp';
-        else if (mime == 'video/mp4') ext = 'mp4';
-        else if (mime == 'video/quicktime') ext = 'mov';
-        else if (mime == 'video/webm') ext = 'webm';
-        else {
-          final dot = lowerName.lastIndexOf('.');
-          ext = (dot != -1) ? lowerName.substring(dot + 1) : 'bin';
-        }
-
-        final storagePath = 'uploads/groups/${c.groupId}/bases/$folderBase/${ts}_$uid.$ext';
-
-        await _withProgress(context, () async {
-          final ref = FirebaseStorage.instance.ref(storagePath);
-          await ref.putData(pick.bytes, SettableMetadata(contentType: mime));
-          final url = await ref.getDownloadURL();
-
-          await FirebaseFirestore.instance
-              .collection('groups').doc(c.groupId)
-              .collection('media')
-              .add({
-            'groupId': c.groupId,
-            'baseIndex': c.baseIndex,
-            'ownerUid': uid,
-            'type': mediaType,
-            'storagePath': storagePath,
-            'downloadURL': url,
-            'contentType': mime,
-            'ext': ext,
-            'createdAt': FieldValue.serverTimestamp(),
-          });
-        }, text: 'Subiendo ${mediaType == 'image' ? 'foto' : 'vídeo'}…');
-
-        await c.loadInitial();
-        Get.snackbar('Listo', mediaType == 'image' ? 'Foto subida' : 'Vídeo subido',
-            snackPosition: SnackPosition.BOTTOM);
-      } catch (e) {
-        Get.snackbar('Error', e.toString(), snackPosition: SnackPosition.BOTTOM);
+      final uid = c.service.userUid ?? FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) {
+        Get.snackbar('Sesión', 'Debes iniciar sesión');
+        return;
       }
 
+      // Captura
+      dynamic pick;
+      switch (action) {
+        case _PickAction.cameraPhoto:
+          pick = await webio.capturePhotoWeb();
+          break;
+        case _PickAction.recordVideo:
+          pick = await webio.captureVideoWeb();
+          break;
+        case _PickAction.gallery:
+          pick = await webio.pickAnyFileWeb();
+          break;
+      }
+      if (pick == null) return;
+
+      // MIME robusto (DetectorMimeSafari)
+      final mime = DetectorMimeSafari.detectarTipoMime(
+        nombreArchivo: pick.filename,
+        mimeOriginal: pick.mime,
+        bytes: pick.bytes,
+      );
+      final mediaType = mime.startsWith('image/')
+          ? 'image'
+          : (mime.startsWith('video/') ? 'video' : 'file');
+
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      final folderBase = c.baseIndex == null ? 'general' : '${c.baseIndex}';
+      final ext = DetectorMimeSafari.obtenerExtensionDeMime(mime);
+      final storagePath =
+          'uploads/groups/${c.groupId}/bases/$folderBase/${ts}_$uid.$ext';
+
+      await _withProgress(context, () async {
+        final ref = FirebaseStorage.instance.ref(storagePath);
+        await ref.putData(
+          pick.bytes,
+          SettableMetadata(contentType: mime, customMetadata: {
+            'from': 'web',
+            'action': action.name,
+            'origMime': pick.mime,
+            'filename': pick.filename,
+          }),
+        );
+        final url = await ref.getDownloadURL();
+
+        await FirebaseFirestore.instance
+            .collection('groups')
+            .doc(c.groupId) // seguro: `groupId` validado en build()
+            .collection('media')
+            .add({
+          'groupId': c.groupId,
+          'baseIndex': c.baseIndex,
+          'ownerUid': uid,
+          'type': mediaType,
+          'storagePath': storagePath,
+          'downloadURL': url,
+          'contentType': mime,
+          'ext': ext,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      },
+          text:
+              'Subiendo ${mediaType == 'image' ? 'foto' : (mediaType == 'video' ? 'vídeo' : 'archivo')}…');
+
+      await c.loadInitial();
+      Get.snackbar(
+          'Listo',
+          mediaType == 'image'
+              ? 'Foto subida'
+              : (mediaType == 'video' ? 'Vídeo subido' : 'Archivo subido'),
+          snackPosition: SnackPosition.BOTTOM);
       return;
     }
 
-
-
-
-
-    // ------ ANDROID / iOS nativo (lo tuyo de siempre) ------
+    // ------ ANDROID / iOS ------
     await _ensurePermissions();
 
     final source = await showModalBottomSheet<_PickAction>(
@@ -443,11 +351,6 @@ class GaleriaScreen extends StatelessWidget {
       builder: (ctx) => SafeArea(
         child: Wrap(
           children: [
-            ListTile(
-              leading: const Icon(Icons.photo_camera),
-              title: const Text('Foto (cámara)'),
-              onTap: () => Navigator.pop(ctx, _PickAction.cameraPhoto),
-            ),
             ListTile(
               leading: const Icon(Icons.photo_library),
               title: const Text('Foto (galería)'),
@@ -462,38 +365,49 @@ class GaleriaScreen extends StatelessWidget {
         ),
       ),
     );
-
     if (source == null) return;
 
-    // ... tu flujo actual móvil tal cual (no lo toco)
     try {
       switch (source) {
-        case _PickAction.cameraPhoto: {
-          final x = await picker.pickImage(
-            source: ImageSource.camera,
-            imageQuality: 85, // compresión básica
-          );
-          if (x == null) return;
+        case _PickAction.cameraPhoto: // (no se mostrará si quitaste el botón, pero queda OK)
+        final x = await picker.pickImage(source: ImageSource.camera, imageQuality: 85);
+        if (x == null) return;
+
+        c.uploadProgress.value = 0.0;
+        c.uploading.value = true;
+        try {
           await c.uploadFile(file: File(x.path), contentType: 'image/jpeg');
-          break;
+        } finally {
+          c.uploading.value = false;
+          c.uploadProgress.value = 0.0;
         }
+        break;
 
-        case _PickAction.gallery: {
-          final x = await picker.pickImage(source: ImageSource.gallery);
-          if (x == null) return;
-          final file = File(x.path);
-          final mime = lookupMimeType(file.path) ?? 'image/jpeg';
+      case _PickAction.gallery:
+        final x = await picker.pickImage(source: ImageSource.gallery);
+        if (x == null) return;
+        final file = File(x.path);
+        final mime = lookupMimeType(file.path) ?? 'image/jpeg';
+
+        c.uploadProgress.value = 0.0;
+        c.uploading.value = true;
+        try {
           await c.uploadFile(file: file, contentType: mime);
-          break;
+        } finally {
+          c.uploading.value = false;
+          c.uploadProgress.value = 0.0;
         }
+        break;
 
-        case _PickAction.recordVideo: {
-          final x = await picker.pickVideo(source: ImageSource.gallery);
-          if (x == null) return;
-          final file = File(x.path);
-          final mime = lookupMimeType(file.path) ?? 'video/mp4';
+      case _PickAction.recordVideo:
+        final x = await picker.pickVideo(source: ImageSource.gallery);
+        if (x == null) return;
+        final file = File(x.path);
+        final mime = lookupMimeType(file.path) ?? 'video/mp4';
 
-          // Mantenemos tu flujo original con compresión/validación vía service.upload
+        c.uploadProgress.value = 0.0;
+        c.uploading.value = true;
+        try {
           await for (final e in c.service.upload(
             groupId: c.groupId,
             baseIndex: c.baseIndex,
@@ -511,68 +425,41 @@ class GaleriaScreen extends StatelessWidget {
               } catch (_) {
                 Get.snackbar('Error', 'No se pudo guardar localmente.');
               }
-              break; // 👈 importante: salir del stream
+              break;
             }
+            // ⬇️ Esto alimenta la barra del overlay
             c.uploadProgress.value = e.progress;
+
             if (e.item != null) {
               c.items.insert(0, e.item!);
               break;
             }
           }
-          break;
+        } finally {
+          c.uploading.value = false;
+          c.uploadProgress.value = 0.0;
         }
-      }
+        break;
 
+      }
     } catch (e) {
-      Get.snackbar('Error', e.toString(), snackPosition: SnackPosition.BOTTOM);
+      Get.snackbar('Error', e.toString(),
+          snackPosition: SnackPosition.BOTTOM);
     }
   }
-
-
 
   Future<void> _ensurePermissions() async {
     await [
       Permission.photos,
       Permission.camera,
-      Permission.storage, // Android antiguos
-      Permission.videos, // Android 13+
-      Permission.photosAddOnly // iOS 14+
+      Permission.storage,
+      Permission.videos,
+      Permission.photosAddOnly
     ].request();
   }
 
-  // --------------------- Confirmaciones ---------------------
-  void _confirmDelete(
-    BuildContext context,
-    GalleryController c,
-    MediaItem item,
-  ) {
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Borrar elemento'),
-        content: const Text('¿Seguro que quieres borrar este elemento?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancelar'),
-          ),
-          TextButton(
-            onPressed: () async {
-              Navigator.pop(dialogContext);
-              await c.deleteItem(item);
-              Get.snackbar('Borrado', 'Se eliminó el elemento.');
-            },
-            child: const Text('Borrar'),
-          ),
-        ],
-      ),
-    );
-  }
-
   Future<bool?> _confirmMassDelete(
-    BuildContext context,
-    GalleryController c,
-  ) {
+      BuildContext context, GalleryController c) {
     return showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -581,46 +468,47 @@ class GaleriaScreen extends StatelessWidget {
             '¿Seguro que quieres borrar ${c.selectedIds.length} elementos?'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancelar'),
-          ),
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancelar')),
           TextButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Borrar'),
-          ),
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Borrar')),
         ],
       ),
     );
   }
 
   Future<T> _withProgress<T>(
-      BuildContext context,
-      Future<T> Function() task, {
-      String text = 'Subiendo…',
-    }) async {
-      Get.dialog(
-        WillPopScope(
-          onWillPop: () async => false,
+    BuildContext context,
+    Future<T> Function() task, {
+    String text = 'Subiendo…',
+  }) async {
+    await Get.dialog(
+      WillPopScope(
+        onWillPop: () async => false,
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 2, sigmaY: 2),
           child: Center(
             child: Container(
               padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(
-                // Tarjeta con color más vivo, no negro puro
-                color: const Color(0xFF0F2A33), // azul verdoso oscuro
+                color: const Color(0xFF0F2A33),
                 borderRadius: BorderRadius.circular(16),
                 boxShadow: const [BoxShadow(blurRadius: 12, color: Colors.black54)],
-                border: Border.all(color: const Color(0xFF00E5FF), width: 1), // borde cian
+                border: Border.all(color: const Color(0xFF00E5FF), width: 1),
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const SizedBox(
-                    width: 28, height: 28,
-                    child: CircularProgressIndicator(strokeWidth: 3, color: Colors.white),
+                    width: 28,
+                    height: 28,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 3, color: Colors.white),
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    text, // <-- ya no es const
+                    text,
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 15,
@@ -632,20 +520,248 @@ class GaleriaScreen extends StatelessWidget {
             ),
           ),
         ),
-        barrierDismissible: false,
-        barrierColor: Colors.black.withOpacity(0.4), // <-- apaga el fondo con transparencia
-      );
-      try {
-        final r = await task();
-        return r;
-      } finally {
-        if (Get.isDialogOpen ?? false) Get.back();
+      ),
+      barrierDismissible: false,
+      barrierColor: Colors.black.withOpacity(0.4),
+    );
+
+    try {
+      return await task();
+    } finally {
+      if (Get.isDialogOpen ?? false) {
+        Get.back();
       }
     }
+  }
+
+  // ---------- Render de cada celda ----------
+  Widget _buildGridItem(MediaItem item, GalleryController c) {
+    return Obx(() {
+      final bool selecting = c.isSelectionMode.value;
+      final bool selected  = c.selectedIds.contains(item.id);
+
+      return GestureDetector(
+        onLongPress: () {
+          if (!selecting) c.enterSelection(item.id);
+        },
+        onSecondaryTap: () {
+          if (!selecting) c.enterSelection(item.id);
+        },
+        onTap: () {
+          if (selecting) {
+            c.toggleSelection(item.id);
+          } else {
+            Get.to(() => MediaDetailView(
+                  items: [item],
+                  initialIndex: 0,
+                  tagBase: 'grid',
+                ));
+          }
+        },
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            // 1) thumbnail
+            _buildGridThumbnail(item),
+
+            // 2) velo leve si está seleccionado
+            if (selected)
+              Container(color: Colors.white.withOpacity(0.14)),
+
+            // 3) fecha/hora (si la usas)
+            Positioned(
+              left: 6,
+              bottom: 6,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  item.createdAtFormatted, // tu getter formateado
+                  style: const TextStyle(color: Colors.white, fontSize: 10),
+                ),
+              ),
+            ),
+
+            // 4) checker cuadrado arriba-derecha SOLO en modo selección
+            if (selecting)
+              Positioned(
+                right: 6,
+                top: 6,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => c.toggleSelection(item.id),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 120),
+                    width: 24,
+                    height: 24,
+                    decoration: BoxDecoration(
+                      color: selected ? Colors.blueAccent : Colors.black45,
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: Colors.white70, width: 1),
+                    ),
+                    child: selected
+                        ? const Icon(Icons.check, size: 16, color: Colors.white)
+                        : const SizedBox.shrink(),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      );
+    });
+  }
 
 
 
+  // Encapsula el render del thumbnail (Web/HEIC/HTML img y móvil con Hero)
+  Widget _buildGridThumbnail(MediaItem item) {
+      // === NUEVO: manejo explícito de videos para todas las plataformas ===
+      if (item.isVideo) {
+        final thumb = item.thumbnailURL;
+        if (thumb != null && thumb.isNotEmpty) {
+          // Tenemos miniatura -> mostrarla como imagen
+          if (kIsWeb) {
+            // Web: <img> nativo
+            return Stack(
+              fit: StackFit.expand,
+              children: [
+                CachedNetworkImage(
+                  imageUrl: thumb,
+                  fit: BoxFit.cover,
+                  imageRenderMethodForWeb: ImageRenderMethodForWeb.HtmlImage,
+                  placeholder: (_, __) => const ColoredBox(
+                    color: Colors.black12,
+                    child: Center(child: CircularProgressIndicator()),
+                  ),
+                  errorWidget: (_, __, ___) => const ColoredBox(
+                    color: Colors.black12,
+                    child: Icon(Icons.videocam),
+                  ),
+                ),
+                const Positioned(
+                  right: 6, bottom: 6,
+                  child: Icon(Icons.play_circle_fill, size: 22, color: Colors.white70),
+                ),
+              ],
+            );
+          } else {
+            // Android/iOS: con Hero como hacías
+            return Stack(
+              fit: StackFit.expand,
+              children: [
+                Hero(
+                  tag: item.id,
+                  child: CachedNetworkImage(
+                    imageUrl: thumb,
+                    fit: BoxFit.cover,
+                    placeholder: (_, __) => const ColoredBox(
+                      color: Colors.black12,
+                      child: Center(child: CircularProgressIndicator()),
+                    ),
+                    errorWidget: (_, __, ___) => const ColoredBox(
+                      color: Colors.black12,
+                      child: Icon(Icons.videocam),
+                    ),
+                  ),
+                ),
+                const Positioned(
+                  right: 6, bottom: 6,
+                  child: Icon(Icons.play_circle_fill, size: 22, color: Colors.white70),
+                ),
+              ],
+            );
+          }
+        } else {
+          // Aún no hay miniatura -> placeholder (NO intentes decodificar el mp4 como imagen)
+          return Container(
+            color: Colors.black12,
+            child: const Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.videocam, size: 28, color: Colors.white70),
+                  SizedBox(height: 4),
+                  Text('Miniatura no disponible',
+                      style: TextStyle(color: Colors.white54, fontSize: 10)),
+                ],
+              ),
+            ),
+          );
+        }
+      }
+
+
+    if (kIsWeb) {
+      // HEIC/HEIF en Web NO Safari: no decodificar → fallback
+      if (item.isImage && item.isHeicLike && !webio.isSafari) {
+        return InkWell(
+          onTap: () {
+            Get.to(() => MediaDetailView(
+                  items: [item],
+                  initialIndex: 0,
+                  tagBase: 'gallery',
+                ));
+          },
+          child: Container(
+            color: Colors.black12,
+            child: const Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.image_not_supported,
+                      size: 28, color: Colors.white70),
+                  SizedBox(height: 4),
+                  Text('HEIC no compatible',
+                      style: TextStyle(color: Colors.white70, fontSize: 11)),
+                  Text('Toca para ver/descargar',
+                      style: TextStyle(color: Colors.white38, fontSize: 10)),
+                ],
+              ),
+            ),
+          ),
+        );
+      }
+
+      // Resto: usa <img> nativo (HtmlImage) y SIN Hero en Web
+      return CachedNetworkImage(
+        imageUrl: item.thumbnailURL ?? item.downloadURL,
+        fit: BoxFit.cover,
+        imageRenderMethodForWeb: ImageRenderMethodForWeb.HtmlImage,
+        placeholder: (_, __) => const ColoredBox(
+          color: Colors.black12,
+          child: Center(child: CircularProgressIndicator()),
+        ),
+        errorWidget: (_, url, err) {
+          // ignore: avoid_print
+          print('[WEB][image-error][grid] url=$url error=$err');
+          return const ColoredBox(
+            color: Colors.black12,
+            child: Icon(Icons.image_not_supported),
+          );
+        },
+      );
+    }
+
+    // ANDROID/iOS: mantenemos Hero
+    return Hero(
+      tag: item.id,
+      child: CachedNetworkImage(
+        imageUrl: item.thumbnailURL ?? item.downloadURL,
+        fit: BoxFit.cover,
+        placeholder: (_, __) => const ColoredBox(
+          color: Colors.black12,
+          child: Center(child: CircularProgressIndicator()),
+        ),
+        errorWidget: (_, __, ___) => const ColoredBox(
+          color: Colors.black12,
+          child: Icon(Icons.error),
+        ),
+      ),
+    );
+  }
 }
 
 enum _PickAction { cameraPhoto, gallery, recordVideo }
-enum _LongPressAction { select, delete }

@@ -30,6 +30,7 @@ dependencies:
   lottie: ^3.0.0
   photo_view: ^0.15.0
   cached_network_image: ^3.3.1
+  cached_network_image_web: ^1.1.1
   flutter_local_notifications: ^18.0.1
 
   # --- CÁMARA Y ARCHIVOS ---
@@ -47,6 +48,8 @@ dependencies:
   file_picker: ^8.0.0
   web: ^1.1.1
   intl: ^0.19.0
+  media_scanner: ^2.1.0
+  
   
 
 dev_dependencies:

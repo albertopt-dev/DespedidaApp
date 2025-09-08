@@ -220,10 +220,11 @@ class HomeAmigoScreen extends StatelessWidget {
               backgroundColor: const Color.fromARGB(255, 216, 196, 104),
               onPressed: () {
                 final g = groupController.group.value!;
-                Get.toNamed('/galeria', arguments: {
-                  'groupId': g.codigo,
-                  'baseIndex': -1, // galería general
-                });
+                Get.toNamed(
+                  '/galeria?groupId=${g.codigo}&baseIndex=-1',
+                  arguments: {'groupId': g.codigo, 'baseIndex': -1},
+                );
+
               },
               child: const Icon(Icons.photo_library, color: Colors.black, size: 32),
             ),
@@ -691,10 +692,10 @@ class VistaPruebaDialog extends StatelessWidget {
                   textColor: Colors.black,
                   onPressed: () {
                     Navigator.of(context).pop();
-                    Get.toNamed('/camara', arguments: {
-                      'groupId': controller.group.value?.codigo,
-                      'baseIndex': baseIndex,
-                    });
+                    Get.toNamed(
+                      '/camara?groupId=${controller.group.value!.codigo}&baseIndex=$baseIndex',
+                      arguments: {'groupId': controller.group.value!.codigo, 'baseIndex': baseIndex},
+                    );
                   },
                 ),
 
