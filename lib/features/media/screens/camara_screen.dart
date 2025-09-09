@@ -114,31 +114,48 @@ class CamaraScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 26),
                     ] else ...[
-                      // Web → mismos 3 botones con funciones web
-                      _ActionButton(
-                        color: const Color(0xFF00E5FF),
-                        foreground: Colors.black,
-                        icon: Icons.photo_camera_outlined,
-                        label: 'Tomar foto',
-                        onTap: controller.capturarFotoWeb,
+                      // Web → mismos 3 botones con ANCHO IGUAL entre ellos (como el más ancho)
+                    IntrinsicWidth( // mide a los hijos y usa el ancho del más ancho
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          SizedBox( // cada botón se estira hasta el ancho decidido por IntrinsicWidth
+                            width: double.infinity,
+                            child: _ActionButton(
+                              color: const Color(0xFF00E5FF),
+                              foreground: Colors.black,
+                              icon: Icons.photo_camera_outlined,
+                              label: 'Tomar foto',
+                              onTap: controller.capturarFotoWeb,
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          SizedBox(
+                            width: double.infinity,
+                            child: _ActionButton(
+                              color: const Color(0xFF4286F4),
+                              foreground: Colors.white,
+                              icon: Icons.videocam_outlined,
+                              label: 'Grabar video',
+                              onTap: controller.capturarVideoWeb,
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          SizedBox(
+                            width: double.infinity,
+                            child: _ActionButton(
+                              color: const Color.fromARGB(255, 58, 194, 164),
+                              foreground: Colors.black,
+                              icon: Icons.photo_library_outlined,
+                              label: 'Subir desde galería',
+                              onTap: controller.pickDesdeGaleriaWeb,
+                            ),
+                          ),
+                          const SizedBox(height: 30),
+                        ],
                       ),
-                      const SizedBox(height: 14),
-                      _ActionButton(
-                        color: const Color(0xFF4286F4),
-                        foreground: Colors.white,
-                        icon: Icons.videocam_outlined,
-                        label: 'Grabar video',
-                        onTap: controller.capturarVideoWeb,
-                      ),
-                      const SizedBox(height: 14),
-                      _ActionButton(
-                        color: const Color(0xFF9C27B0),
-                        foreground: Colors.white,
-                        icon: Icons.photo_library_outlined,
-                        label: 'Subir desde galería',
-                        onTap: controller.pickDesdeGaleriaWeb,
-                      ),
-                      const SizedBox(height: 30),
+                    ),
+
                     ],
 
                     const Text(

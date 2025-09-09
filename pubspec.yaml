@@ -15,6 +15,7 @@ dependencies:
   # --- FIREBASE (todas compatibles entre sí) ---
   firebase_core: ^3.15.2
   firebase_auth: ^5.7.0
+  firebase_app_check: ^0.3.1+4
   cloud_firestore: ^5.6.12
   firebase_storage: ^12.4.10
   firebase_messaging: ^15.2.10
@@ -70,9 +71,9 @@ flutter:
     - assets/audio/notificacion.mp3
 
   fonts:
-    - family: DancingScript
+    - family: Delius-Regular
       fonts:
-        - asset: assets/fonts/DancingScript-SemiBold.ttf
+        - asset: assets/fonts/Delius-Regular.ttf
           weight: 700
 
 flutter_launcher_icons:

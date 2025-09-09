@@ -90,21 +90,8 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
       body: AnimatedBuilder(
         animation: _bgController,
         builder: (context, _) {
-          final t = _bgController.value;
-
-          // Interpolamos colores para el degradado
-          final c1 = Color.lerp(const Color(0xFF0D1B1E), const Color(0xFF12242A), t)!;
-          final c2 = Color.lerp(const Color(0xFF102A30), const Color(0xFF18414A), t)!;
-          final c3 = Color.lerp(const Color(0xFF133940), const Color.fromARGB(255, 27, 87, 100), t)!;
-
           return Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [c1, c2, c3],
-              ),
-            ),
+            decoration: const BoxDecoration(color: Color.fromARGB(255, 14, 13, 13)),
             child: Stack(
               children: [
                 // Lottie (arriba centrado)
@@ -162,7 +149,7 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
                         fontSize: 26,
                         fontWeight: FontWeight.bold,
                         color: Colors.white,
-                        fontFamily: 'DancingScript',
+                        fontFamily: 'Delius-Regular', // Cambiado a Delius
                         shadows: [
                           Shadow(
                             blurRadius: 8,

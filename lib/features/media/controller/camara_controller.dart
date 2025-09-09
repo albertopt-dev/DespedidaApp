@@ -9,7 +9,8 @@ import 'package:despedida/features/media/controller/gallery_controller.dart';
 import 'package:despedida/features/media/services/gallery_service.dart';
 import 'package:despedida/web/io_stub.dart'
   if (dart.library.html) 'package:despedida/web/io_web.dart' as webio;
-  import 'package:despedida/web/mime_detector.dart';
+import 'package:despedida/web/mime_detector.dart';
+
 
 import 'package:media_scanner/media_scanner.dart';
 import 'package:gal/gal.dart'; // <- FALTABA
@@ -168,10 +169,22 @@ class CamaraController extends GetxController {
         onProgress: (p) => uploadProgress.value = p,
       );
 
-      final tag = 'gallery-$groupId-$baseIndex';
+      final tag = baseIndex != null ? 'gallery-$groupId-$baseIndex' : 'gallery-$groupId';
       if (Get.isRegistered<GalleryController>(tag: tag)) {
         await Get.find<GalleryController>(tag: tag).loadInitial();
       }
+
+      // --- AÑADIR: ofrecer guardar en dispositivo (Share Sheet iOS / descarga fallback) ---
+      try {
+        await webio.saveToDeviceWeb(
+          bytes: pick.bytes,
+          filename: pick.filename,
+          mime: mime,
+        );
+      } catch (_) {
+        // silencioso: si falla share/descarga no rompemos la UX
+      }
+
 
       Get.snackbar('Listo', 'Foto subida');
     } catch (e, st) {
@@ -199,6 +212,13 @@ class CamaraController extends GetxController {
 
       print('[WEB] capturarVideoWeb name=${pick.filename} mimeOrig=${pick.mime} mimeDet=$mime bytes=${pick.bytes.length}');
 
+      // ⛔️ Límite de duración (30s) en Web antes de subir
+      final dur = await webio.probeVideoDurationSeconds(pick.bytes, mime: mime);
+      if (dur != null && dur > 30.0) {
+        Get.snackbar('Límite de duración', 'El vídeo supera 30s');
+        return;
+      }
+
       final uid = FirebaseAuth.instance.currentUser?.uid;
       if (uid == null) {
         Get.snackbar('Sesión', 'Debes iniciar sesión');
@@ -218,10 +238,22 @@ class CamaraController extends GetxController {
         onProgress: (p) => uploadProgress.value = p,
       );
 
-      final tag = 'gallery-$groupId-$baseIndex';
+      final tag = baseIndex != null ? 'gallery-$groupId-$baseIndex' : 'gallery-$groupId';
       if (Get.isRegistered<GalleryController>(tag: tag)) {
         await Get.find<GalleryController>(tag: tag).loadInitial();
       }
+
+      // --- AÑADIR: ofrecer guardar en dispositivo (Share Sheet iOS / descarga fallback) ---
+      try {
+        await webio.saveToDeviceWeb(
+          bytes: pick.bytes,
+          filename: pick.filename,
+          mime: mime,
+        );
+      } catch (_) {
+        // silencioso
+      }
+
 
       Get.snackbar('Listo', 'Vídeo subido');
     } catch (e, st) {
@@ -268,7 +300,7 @@ class CamaraController extends GetxController {
         onProgress: (p) => uploadProgress.value = p,
       );
 
-      final tag = 'gallery-$groupId-$baseIndex';
+      final tag = baseIndex != null ? 'gallery-$groupId-$baseIndex' : 'gallery-$groupId';
       if (Get.isRegistered<GalleryController>(tag: tag)) {
         await Get.find<GalleryController>(tag: tag).loadInitial();
       }

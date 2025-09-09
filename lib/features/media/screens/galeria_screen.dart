@@ -239,20 +239,22 @@ class GaleriaScreen extends StatelessWidget {
           child: Wrap(
             children: [
               ListTile(
-                leading: const Icon(Icons.photo_camera),
-                title: const Text('Tomar foto'),
+                leading: const Icon(Icons.photo_library),
+                title: const Text('Galería (fotos)'),
+                // reutilizamos cameraPhoto para NO tocar el enum ni más lógica
                 onTap: () => Navigator.pop(ctx, _PickAction.cameraPhoto),
               ),
               ListTile(
-                leading: const Icon(Icons.videocam),
-                title: const Text('Grabar vídeo'),
+                leading: const Icon(Icons.video_library),
+                title: const Text('Galería (vídeos)'),
                 onTap: () => Navigator.pop(ctx, _PickAction.recordVideo),
               ),
-              ListTile(
-                leading: const Icon(Icons.photo_library),
-                title: const Text('Desde galería'),
-                onTap: () => Navigator.pop(ctx, _PickAction.gallery),
-              ),
+              // (Opcional) deja esta tercera si quieres mixto (cualquier archivo)
+              // ListTile(
+              //   leading: const Icon(Icons.perm_media),
+              //   title: const Text('Galería (cualquier archivo)'),
+              //   onTap: () => Navigator.pop(ctx, _PickAction.gallery),
+              // ),
             ],
           ),
         ),
@@ -274,15 +276,19 @@ class GaleriaScreen extends StatelessWidget {
       dynamic pick;
       switch (action) {
         case _PickAction.cameraPhoto:
-          pick = await webio.capturePhotoWeb();
+          // En Web: “Galería (fotos)”
+          pick = await webio.pickImagesFromLibrary();
           break;
         case _PickAction.recordVideo:
-          pick = await webio.captureVideoWeb();
+          // En Web: “Galería (vídeos)”
+          pick = await webio.pickVideosFromLibrary();
           break;
         case _PickAction.gallery:
+          // (Opcional) Mixto: fotos o vídeos desde galería/archivos
           pick = await webio.pickAnyFileWeb();
           break;
       }
+
       if (pick == null) return;
 
       // MIME robusto (DetectorMimeSafari)
@@ -295,51 +301,43 @@ class GaleriaScreen extends StatelessWidget {
           ? 'image'
           : (mime.startsWith('video/') ? 'video' : 'file');
 
-      final ts = DateTime.now().millisecondsSinceEpoch;
-      final folderBase = c.baseIndex == null ? 'general' : '${c.baseIndex}';
-      final ext = DetectorMimeSafari.obtenerExtensionDeMime(mime);
-      final storagePath =
-          'uploads/groups/${c.groupId}/bases/$folderBase/${ts}_$uid.$ext';
+      // ⛔️ Límite de duración (30s) para vídeos en Web
+      if (mediaType == 'video') {
+        final dur = await webio.probeVideoDurationSeconds(pick.bytes, mime: mime);
+        if (dur != null && dur > 30.0) {
+          Get.snackbar('Límite de duración', 'El vídeo supera 30s');
+          return;
+        }
+      }
 
-      await _withProgress(context, () async {
-        final ref = FirebaseStorage.instance.ref(storagePath);
-        await ref.putData(
-          pick.bytes,
-          SettableMetadata(contentType: mime, customMetadata: {
-            'from': 'web',
-            'action': action.name,
-            'origMime': pick.mime,
-            'filename': pick.filename,
-          }),
+
+      // Usa el overlay propio de la galería (c.uploading + c.uploadProgress)
+      c.uploadProgress.value = 0.0;
+      c.uploading.value = true;
+      try {
+        await c.service.uploadBytesWeb(
+          groupId: c.groupId,
+          baseIndex: c.baseIndex,
+          bytes: pick.bytes,
+          filename: pick.filename,
+          mime: mime,
+          onProgress: (p) => c.uploadProgress.value = p,
         );
-        final url = await ref.getDownloadURL();
 
-        await FirebaseFirestore.instance
-            .collection('groups')
-            .doc(c.groupId) // seguro: `groupId` validado en build()
-            .collection('media')
-            .add({
-          'groupId': c.groupId,
-          'baseIndex': c.baseIndex,
-          'ownerUid': uid,
-          'type': mediaType,
-          'storagePath': storagePath,
-          'downloadURL': url,
-          'contentType': mime,
-          'ext': ext,
-          'createdAt': FieldValue.serverTimestamp(),
-        });
-      },
-          text:
-              'Subiendo ${mediaType == 'image' ? 'foto' : (mediaType == 'video' ? 'vídeo' : 'archivo')}…');
+        await c.loadInitial();
 
-      await c.loadInitial();
-      Get.snackbar(
+        Get.snackbar(
           'Listo',
           mediaType == 'image'
               ? 'Foto subida'
               : (mediaType == 'video' ? 'Vídeo subido' : 'Archivo subido'),
-          snackPosition: SnackPosition.BOTTOM);
+          snackPosition: SnackPosition.BOTTOM,
+        );
+      } finally {
+        c.uploading.value = false;
+        c.uploadProgress.value = 0.0;
+      }
+
       return;
     }
 

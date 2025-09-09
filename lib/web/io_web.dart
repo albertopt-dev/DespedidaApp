@@ -277,6 +277,18 @@ bool _containsAscii(Uint8List bytes, String ascii) {
   return false;
 }
 
+void _forceCaptureAttribute(html.FileUploadInputElement input, String value) {
+  // Algunos runtimes de Safari exponen 'capture' solo como propiedad JS.
+  try {
+    (input as dynamic).capture = value; // 'environment' o 'user'
+  } catch (_) {
+    // ignore
+  }
+  // Y además como atributo HTML (cubre otros navegadores)
+  input.setAttribute('capture', value);
+}
+
+
 Future<PickResult?> _pickWith({
   required String accept,
   String? capture, // 'environment' para cámara trasera
@@ -285,9 +297,10 @@ Future<PickResult?> _pickWith({
     final input = html.FileUploadInputElement()
       ..accept = accept
       ..multiple = false;
-    if (capture != null && !isSafari) {
-      input.setAttribute('capture', capture);
+    if (capture != null) {
+      _forceCaptureAttribute(input, capture);
     }
+
 
     // Oculto
     input.style
@@ -336,9 +349,113 @@ Future<PickResult?> _pickWith({
   } catch (_) {
     return null;
   }
+  
 }
 
 // API pública (igual que la tuya)
 Future<PickResult?> pickAnyFileWeb()  => _pickWith(accept: 'image/*,video/*');
 Future<PickResult?> capturePhotoWeb() => _pickWith(accept: 'image/*',  capture: 'environment');
 Future<PickResult?> captureVideoWeb() => _pickWith(accept: 'video/*',  capture: 'environment');
+// GALERÍA (solo fotos): sin 'capture' para no abrir cámara
+Future<PickResult?> pickImagesFromLibrary() {
+  return _pickWith(accept: 'image/*', capture: null);
+}
+
+// GALERÍA (solo vídeos): sin 'capture'
+Future<PickResult?> pickVideosFromLibrary() {
+  return _pickWith(accept: 'video/*', capture: null);
+}
+
+// Lee la duración del vídeo (en segundos) a partir de los bytes, sin adjuntar al DOM.
+Future<double?> probeVideoDurationSeconds(Uint8List bytes, {String? mime}) async {
+  try {
+    final blob = html.Blob([bytes], mime ?? 'video/mp4');
+    final url = html.Url.createObjectUrlFromBlob(blob);
+    final video = html.VideoElement()
+      ..preload = 'metadata'
+      ..src = url;
+
+    final completer = Completer<double?>();
+    late StreamSubscription subLoaded;
+    late StreamSubscription subError;
+
+    void cleanup() {
+      try { subLoaded.cancel(); } catch (_) {}
+      try { subError.cancel(); } catch (_) {}
+      try { video.src = ''; } catch (_) {}
+      try { html.Url.revokeObjectUrl(url); } catch (_) {}
+    }
+
+    subLoaded = video.onLoadedMetadata.listen((_) {
+      final raw = video.duration; // num
+      cleanup();
+      // Safari puede reportar NaN/Infinity si falla metadata
+      if (raw is num && raw.isFinite && raw > 0) {
+        completer.complete(raw.toDouble()); // <- convertir a double
+      } else {
+        completer.complete(null);
+      }
+    });
+
+
+    subError = video.onError.listen((_) {
+      cleanup();
+      completer.complete(null);
+    });
+
+    // timeout de cortesía
+    return await completer.future
+        .timeout(const Duration(seconds: 8), onTimeout: () => null);
+  } catch (_) {
+    return null;
+  }
+}
+
+
+// --- Guardar en dispositivo (Share Sheet en iOS/Android web; fallback: descarga) ---
+Future<void> saveToDeviceWeb({
+  required Uint8List bytes,
+  required String filename,
+  required String mime,
+}) async {
+  // Construir Blob y File
+  final blob = html.Blob([bytes], mime);
+  final file = html.File([blob], filename, {'type': mime});
+
+  // Intentar Web Share API con archivos (iOS 15+/16+ lo soporta en Safari)
+  final nav = html.window.navigator as dynamic;
+  try {
+    final canShare = js_util.hasProperty(nav, 'canShare') &&
+        (js_util.callMethod(nav, 'canShare', [
+          js_util.jsify({'files': [file]})
+        ]) as bool);
+
+    if (canShare && js_util.hasProperty(nav, 'share')) {
+      await js_util.promiseToFuture(js_util.callMethod(nav, 'share', [
+        js_util.jsify({
+          'files': [file],
+          'title': filename,
+          'text': mime.startsWith('image/')
+              ? 'Imagen'
+              : (mime.startsWith('video/') ? 'Vídeo' : 'Archivo')
+        })
+      ]));
+      return; // Compartido (el usuario puede "Guardar imagen/vídeo")
+    }
+  } catch (_) {
+    // seguimos a fallback
+  }
+
+  // Fallback universal: forzar descarga (el usuario puede guardarlo en Archivos/Fotos)
+  final url = html.Url.createObjectUrlFromBlob(blob);
+  try {
+    final a = html.AnchorElement(href: url)..download = filename;
+    a.style.display = 'none';
+    html.document.body?.append(a);
+    a.click();
+    a.remove();
+  } finally {
+    html.Url.revokeObjectUrl(url);
+  }
+}
+
