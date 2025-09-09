@@ -94,14 +94,14 @@ class HomeAmigoScreen extends StatelessWidget {
           const Offset(0.20, 0.30),
           const Offset(0.40, 0.28),
           const Offset(0.60, 0.30),
-          const Offset(0.80, 0.40),
-          const Offset(0.65, 0.46),
-          const Offset(0.48, 0.46),
+          const Offset(0.78, 0.40),
+          const Offset(0.63, 0.46),
+          const Offset(0.45, 0.46),
           const Offset(0.30, 0.54),
           const Offset(0.30, 0.69),
-          const Offset(0.50, 0.65),
-          const Offset(0.64, 0.70),
-          const Offset(0.45, 0.82),
+          const Offset(0.46, 0.65),
+          const Offset(0.62, 0.70),
+          const Offset(0.50, 0.82),
         ];
 
         return LayoutBuilder(
@@ -324,6 +324,94 @@ class BaseCirculo extends StatelessWidget {
   }
 }
 
+// ==================== VOTE STATS WIDGET ====================
+class VoteStats extends StatelessWidget {
+  final Map<String, dynamic> votos;   // uid -> 'nodecona'|'repetir'|'palante'
+  final List<String> miembros;        // UIDs del grupo
+  final String? novioUid;             // uid del novio (si quieres excluirlo)
+  final bool incluirNovio;            // true si el novio también vota
+
+  const VoteStats({
+    super.key,
+    required this.votos,
+    required this.miembros,
+    required this.novioUid,
+    this.incluirNovio = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final expected = _expectedVoters(miembros, novioUid, incluirNovio);
+    final totEmitidos = votos.length;
+
+    final counts = {'nodecona': 0, 'repetir': 0, 'palante': 0};
+    for (final v in votos.values) {
+      if (counts.containsKey(v)) counts[v] = counts[v]! + 1;
+    }
+
+    Widget row(String label, String key, Color color) {
+      final c = counts[key]!;
+      final pctGroup = expected > 0 ? (c / expected) : 0.0;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(width: 10, height: 10, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+              const SizedBox(width: 8),
+              Text("$label  •  $c/$expected  (${(pctGroup * 100).round()}%)",
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
+            ],
+          ),
+          const SizedBox(height: 6),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: LinearProgressIndicator(
+              value: pctGroup.clamp(0.0, 1.0),
+              minHeight: 8,
+              backgroundColor: Colors.black12,
+              color: color,
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.black12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text("Estadísticas de votos", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 10),
+          row("Ni de coña", 'nodecona', Colors.red),
+          const SizedBox(height: 10),
+          row("Repetir", 'repetir', Colors.orange),
+          const SizedBox(height: 10),
+          row("Pa' lante", 'palante', Colors.green),
+          const SizedBox(height: 14),
+          Text("Votos emitidos: $totEmitidos / $expected  •  Faltan: ${expected - totEmitidos}",
+              style: const TextStyle(color: Colors.black54)),
+        ],
+      ),
+    );
+  }
+
+  int _expectedVoters(List<String> members, String? novioUid, bool incluirNovio) {
+    if (members.isEmpty) return 0;
+    final hasNovio = (novioUid != null && novioUid.isNotEmpty && members.contains(novioUid));
+    if (incluirNovio || !hasNovio) return members.length;
+    return (members.length - 1).clamp(0, 1 << 30);
+  }
+}
+// ==================== END VOTE STATS WIDGET ====================
+
 
 class PruebaDialog extends StatefulWidget {
   final String nombreBase;
@@ -513,11 +601,12 @@ class VistaPruebaDialog extends StatelessWidget {
     required this.baseIndex,
     required this.prueba,
   });
-
+  
   @override
   Widget build(BuildContext context) {
     final controller = Get.find<GroupController>();
     final bool puedeIniciar = !controller.esNovio && prueba['pruebaActiva'] != true;
+    final isActiva = controller.group.value?.pruebas[baseIndex]['pruebaActiva'] == true;
 
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -758,19 +847,26 @@ class VistaPruebaDialog extends StatelessWidget {
                 ),
 
                 // Botón de votar
+                
+
                 _buildButton(
                   context: context,
                   icon: Icons.how_to_vote,
                   label: "Votar",
-                  color: const Color(0xFFFCE519), // Amarillo intenso
-                  textColor: Colors.black,
-                  onPressed: () {
-                    showDialog(
-                      context: context,
-                      builder: (context) => VotacionDialog(baseIndex: baseIndex),
-                    );
-                  },
+                  color: isActiva ? const Color(0xFFFCE519) : Colors.grey[300]!,
+                  textColor: isActiva ? Colors.black : Colors.grey[600]!,
+                  onPressed: isActiva
+                      ? () {
+                          showDialog(
+                            context: context,
+                            builder: (context) => VotacionDialog(baseIndex: baseIndex),
+                          );
+                        }
+                      : () {
+                          Get.snackbar("Prueba no iniciada", "Antes pulsa 'Iniciar' para habilitar la votación.");
+                        },
                 ),
+
               ],
             ),
 
@@ -881,20 +977,107 @@ class VotacionDialog extends StatelessWidget {
     final controller = Get.find<GroupController>();
     final prueba = controller.group.value?.pruebas[baseIndex];
     final votos = Map<String, dynamic>.from(prueba?['votos'] ?? {});
-    final total = votos.length;
+    final expected = controller.expectedVotersCount;
+
+    // Estado de la prueba
+    final isActiva = prueba != null && (prueba['pruebaActiva'] == true);
+
+    // Métricas de quórum (ajusta el 0.50 si quieres otro mínimo)
+    final emitidos = votos.length;
+    final quorumMinimo = (expected * 0.50).ceil();
+    final quorumAlcanzado = expected > 0 && emitidos >= quorumMinimo;
+    final faltan = (expected - emitidos).clamp(0, expected);
 
     return AlertDialog(
       title: const Text("¿Ha superado la prueba?", textAlign: TextAlign.center),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const SizedBox(height: 18),
-          _buildVotoButton(context, controller, "Ni de coña", "nodecona", votos, total),
-          const SizedBox(height: 12),
-          _buildVotoButton(context, controller, "Repetir", "repetir", votos, total),
-          const SizedBox(height: 12),
-          _buildVotoButton(context, controller, "Pa' lante", "palante", votos, total),
-        ],
+      content: SizedBox(
+        width: 360, // evita problemas de IntrinsicWidth
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // ---- CARD ESTADO DE PRUEBA ----
+            Card(
+              elevation: 1.5,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      isActiva ? "Prueba en curso" : "Prueba no iniciada",
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: isActiva ? Colors.green[800] : Colors.red[700],
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      isActiva
+                          ? "Puedes votar ahora."
+                          : "Pulsa 'Iniciar' primero para habilitar la votación.",
+                      style: const TextStyle(fontSize: 12, color: Colors.black54),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 12),
+
+            // ---- CARD DE QUÓRUM/PROGRESO ----
+            Card(
+              elevation: 1.5,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      "Votos emitidos: $emitidos / $expected",
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 8),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: LinearProgressIndicator(
+                        value: expected > 0 ? (emitidos / expected).clamp(0.0, 1.0) : 0.0,
+                        minHeight: 8,
+                        backgroundColor: Colors.black12,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      quorumAlcanzado
+                          ? "✅ Quórum alcanzado (mín. $quorumMinimo)"
+                          : "⚠️ Aún faltan $faltan votos para alcanzar el quórum (mín. $quorumMinimo)",
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: quorumAlcanzado ? Colors.green[700] : Colors.black54,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 16),
+
+            // ---- BOTONES EN HORIZONTAL (sin Expanded) ----
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              alignment: WrapAlignment.center,
+              children: [
+                SizedBox(width: 108, child: _buildVotoButton(context, controller, "Ni de coña", "nodecona", votos, expected, isActiva)),
+                SizedBox(width: 108, child: _buildVotoButton(context, controller, "Repetir", "repetir", votos, expected, isActiva)),
+                SizedBox(width: 108, child: _buildVotoButton(context, controller, "Pa' lante", "palante", votos, expected, isActiva)),
+              ],
+            ),
+          ],
+        ),
       ),
       actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cerrar"))],
     );
@@ -906,83 +1089,64 @@ class VotacionDialog extends StatelessWidget {
     String texto,
     String tipo,
     Map<String, dynamic> votos,
-    int total,
+    int expected,
+    bool isActiva, // <-- nuevo parámetro
   ) {
     final count = votos.values.where((v) => v == tipo).length;
-    final porcentaje = total > 0 ? (count / total * 100).round() : 0;
+    final porcentaje = (expected > 0) ? ((count / expected) * 100).round() : 0;
 
     Color colorBase;
     switch (tipo) {
-      case 'nodecona':
-        colorBase = Colors.red;
-        break;
-      case 'repetir':
-        colorBase = Colors.orange;
-        break;
-      case 'palante':
-        colorBase = Colors.green;
-        break;
-      default:
-        colorBase = Colors.grey;
+      case 'nodecona': colorBase = Colors.red; break;
+      case 'repetir':  colorBase = Colors.orange; break;
+      case 'palante':  colorBase = Colors.green; break;
+      default:         colorBase = Colors.grey;
     }
 
     return ElevatedButton(
-      onPressed: () async {
+      onPressed: !isActiva ? null : () async {
         final uid = FirebaseAuth.instance.currentUser?.uid;
+        if (uid == null) return;
 
         if (votos.containsKey(uid)) {
           Get.snackbar("Ya has votado", "Solo puedes votar una vez por prueba");
           return;
         }
 
-        await controller.votarPrueba(baseIndex: baseIndex, voto: tipo);
+        await controller.votarPrueba(
+          baseIndex: baseIndex,
+          voto: tipo,
+          umbralAprobado: 0.70, // 70% para aprobar
+          quorumMinimo: 0.50,   // 50% de quórum
+        );
+
+        // (opcional) si usas la espera y celebración:
+        // final aprobada = await controller.esperarSuperada(baseIndex, timeout: const Duration(seconds: 5));
+        // if (aprobada) {
+        //   await showDialog(context: context, barrierDismissible: false, builder: (_) => const CelebracionDialog());
+        //   await controller.marcarCelebracionMostrada(baseIndex);
+        // }
+
         Get.back();
         Get.snackbar("Voto enviado", "Tu voto ha sido registrado.");
-
-        final prueba = controller.group.value?.pruebas[baseIndex];
-        if (prueba == null) return;
-
-        final votosActualizados = Map<String, dynamic>.from(prueba['votos'] ?? {});
-        final resultado = _contarVotos(votosActualizados);
-
-        final total = votosActualizados.length;
-        final votosPalante = resultado['palante'] ?? 0;
-        final porcentajePalante = total > 0 ? (votosPalante / total) * 100 : 0;
-
-        // ✅ ahora pedimos al menos 80% "pa'lante"
-        if (porcentajePalante >= 80) {
-          await controller.marcarPruebaSuperada(baseIndex);
-
-          // Celebración
-          // ignore: use_build_context_synchronously
-          showDialog(
-            context: context,
-            barrierDismissible: false,
-            builder: (_) => const CelebracionDialog(),
-          );
-        } else if (total == resultado['nodecona']! + resultado['repetir']!) {
-          // 👈 opcional: si TODOS votan en contra
-          Get.snackbar("Prueba no superada", "Habrá que intentarlo de nuevo...");
-        }
       },
-
       style: ElevatedButton.styleFrom(
-        padding: const EdgeInsets.symmetric(horizontal: 36, vertical: 16),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
         backgroundColor: colorBase,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text("$porcentaje% - $count voto${count != 1 ? 's' : ''}",
-              style: const TextStyle(color: Colors.white70, fontSize: 12)),
+          Text("$porcentaje% • $count/$expected", style: const TextStyle(color: Colors.white70, fontSize: 12)),
           const SizedBox(height: 4),
-          Text(texto, style: const TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold)),
+          Text(texto, style: const TextStyle(fontSize: 16, color: Colors.white, fontWeight: FontWeight.bold)),
         ],
       ),
     );
   }
 
+  // (Opcional) Déjalo si lo usas en otro lado
   Map<String, int> _contarVotos(Map<String, dynamic> votos) {
     final Map<String, int> contador = {'nodecona': 0, 'repetir': 0, 'palante': 0};
     for (final v in votos.values) {
@@ -991,6 +1155,7 @@ class VotacionDialog extends StatelessWidget {
     return contador;
   }
 }
+
 
 
 

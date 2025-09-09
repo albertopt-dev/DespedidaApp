@@ -25,6 +25,29 @@ class GroupController extends GetxController {
   /// ¿Este usuario es el novio?
   bool get esNovio => uid == group.value?.novioUid;
 
+    /// Nº de votantes esperados (excluye al novio por defecto)
+    int get expectedVotersCount {
+      final g = group.value;
+      if (g == null) return 0;
+
+      // En tu loadGroup ya usas 'miembros' como List<String> de UIDs
+      final miembros = <String>[];
+      try {
+        miembros.addAll(List<String>.from(g.miembros));
+      } catch (_) {}
+
+      if (miembros.isEmpty) return 0;
+
+      final novioUid = g.novioUid ?? '';
+      // Si el novio NO vota, lo excluimos. Si debe votar, devuelve miembros.length.
+      final expected = (novioUid.isNotEmpty && miembros.contains(novioUid))
+          ? (miembros.length - 1)
+          : miembros.length;
+
+      return expected < 0 ? 0 : expected;
+    }
+
+
   // -----------------------------------------------------------
   // CARGA DE GRUPO (resuelve docId real a partir del código)
   // -----------------------------------------------------------
@@ -247,27 +270,68 @@ Future<void> loadGroup() async {
     }
   }
 
-  Future<void> votarPrueba({
+    Future<void> votarPrueba({
     required int baseIndex,
     required String voto,
-  }) async {
-    final currentUid = _auth.currentUser?.uid;
-    final g = group.value;
-    if (g == null || currentUid == null || _groupDocId == null) return;
+    double umbralAprobado = 0.70,   // 70%
+    double quorumMinimo   = 0.50,   // 50% del grupo debe haber votado (opcional)
+    }) async {
+      final currentUid = _auth.currentUser?.uid;
+      if (currentUid == null || _groupDocId == null) return;
 
-    final pruebas = List<Map<String, dynamic>>.from(g.pruebas);
-    if (baseIndex >= pruebas.length) return;
+      final docRef = _firestore.collection('groups').doc(_groupDocId);
 
-    final prueba = Map<String, dynamic>.from(pruebas[baseIndex]);
-    final votos = Map<String, dynamic>.from(prueba['votos'] ?? {});
-    votos[currentUid] = voto;
+      await _firestore.runTransaction((tx) async {
+        final snap = await tx.get(docRef);
+        if (!snap.exists) return;
 
-    prueba['votos'] = votos;
-    pruebas[baseIndex] = prueba;
+        final data = snap.data() as Map<String, dynamic>;
+        final pruebas = List<Map<String, dynamic>>.from(data['pruebas'] ?? []);
+        if (baseIndex < 0 || baseIndex >= pruebas.length) return;
 
-    await _firestore.collection('groups').doc(_groupDocId).update({'pruebas': pruebas});
-    group.value = g.copyWith(pruebas: pruebas);
-  }
+        final prueba = Map<String, dynamic>.from(pruebas[baseIndex]);
+        final votos  = Map<String, dynamic>.from(prueba['votos'] ?? {});
+
+        // ⬇️⬇️⬇️ AÑADIR AQUÍ: no permitir votar si la prueba no está activa
+        if (prueba['pruebaActiva'] != true) {
+          return; // simplemente no registra el voto
+        }
+        // ⬆️⬆️⬆️
+
+        // 1) Evitar re-votar
+        if (votos.containsKey(currentUid)) return;
+
+        // 2) Registrar voto
+        votos[currentUid] = voto;
+        prueba['votos'] = votos;
+
+        // 3) Cálculo sobre el total esperado (excluye novio por defecto)
+        final miembros = List<String>.from(data['miembros'] ?? const <String>[]);
+        final novioUid = (data['novioUid'] as String?) ?? '';
+        final expected = (novioUid.isNotEmpty && miembros.contains(novioUid))
+            ? (miembros.length - 1)
+            : miembros.length;
+
+        final totalEmitidos = votos.length;
+        final votosPalante  = votos.values.where((v) => v == 'palante').length;
+
+        final bool cumpleUmbral = expected > 0 && (votosPalante / expected) >= umbralAprobado;
+        final bool cumpleQuorum = expected == 0 ? false : (totalEmitidos / expected) >= quorumMinimo;
+
+        // 4) Marcar superada si procede (idempotente)
+        if (cumpleUmbral && cumpleQuorum) {
+          prueba['superada'] = true;
+        }
+
+        // 5) Persistir
+        pruebas[baseIndex] = prueba;
+        tx.update(docRef, {'pruebas': pruebas});
+      });
+
+      // Tu stream ya actualizará 'group'; este loadGroup es opcional
+      await loadGroup();
+    }
+
 
   // -----------------------------------------------------------
   // TOKENS / NOTIFICACIONES
@@ -375,5 +439,28 @@ Future<void> joinGroupWithCode(String code) async {
   group.value = GroupModel.fromMap(snap.data()!);
   update();
 }
+
+Future<bool> esperarSuperada(int index, {Duration timeout = const Duration(seconds: 5)}) async {
+  if (_groupDocId == null) return false;
+  final docRef = _firestore.collection('groups').doc(_groupDocId);
+
+  try {
+    final ok = await docRef
+        .snapshots()
+        .map((snap) {
+          final data = snap.data();
+          if (data == null) return false;
+          final pruebas = List<Map<String, dynamic>>.from(data['pruebas'] ?? const []);
+          if (index < 0 || index >= pruebas.length) return false;
+          return pruebas[index]['superada'] == true;
+        })
+        .firstWhere((v) => v == true)
+        .timeout(timeout);
+    return ok;
+  } catch (_) {
+    return false; // timeout o error → no aprobada (todavía)
+  }
+}
+
 
 }

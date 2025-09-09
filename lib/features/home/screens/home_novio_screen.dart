@@ -8,6 +8,8 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:despedida/features/auth/services/signout_helper.dart';
+import 'package:despedida/features/home/screens/celebracion_dialog.dart';
+
 
 // ✅ Usa SIEMPRE el mismo canal que en main.dart y en la Function
 const AndroidNotificationChannel channel = AndroidNotificationChannel(
@@ -32,6 +34,9 @@ class _HomeNovioScreenState extends State<HomeNovioScreen> {
 
   final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
       FlutterLocalNotificationsPlugin();
+
+  // ⬇️ NUEVO: flag para celebration en curso
+  final ValueNotifier<bool> _celeShown = ValueNotifier(false);
 
   @override
   void initState() {
@@ -75,6 +80,7 @@ class _HomeNovioScreenState extends State<HomeNovioScreen> {
     @override
     void dispose() {
     _dialogShown.dispose(); // ✅ evita fugas
+    _celeShown.dispose();
     super.dispose();
   }
 
@@ -179,14 +185,14 @@ class _HomeNovioScreenState extends State<HomeNovioScreen> {
           const Offset(0.20, 0.30),
           const Offset(0.40, 0.28),
           const Offset(0.60, 0.30),
-          const Offset(0.80, 0.40),
-          const Offset(0.65, 0.46),
-          const Offset(0.48, 0.46),
+          const Offset(0.78, 0.40),
+          const Offset(0.63, 0.46),
+          const Offset(0.45, 0.46),
           const Offset(0.30, 0.54),
           const Offset(0.30, 0.69),
-          const Offset(0.50, 0.65),
-          const Offset(0.64, 0.70),
-          const Offset(0.45, 0.82),
+          const Offset(0.46, 0.65),
+          const Offset(0.62, 0.70),
+          const Offset(0.50, 0.82),
         ];
 
 
@@ -278,23 +284,58 @@ class _HomeNovioScreenState extends State<HomeNovioScreen> {
                             ? pruebasRaw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
                             : const [];
 
+                    // 1) PRIORIDAD: mostrar CELEBRACIÓN si hay alguna superada pendiente
+                    final idxCelebracion = pruebasList.indexWhere(
+                      (p) => p['superada'] == true && p['mostradaCelebracion'] != true,
+                    );
+
+                    if (idxCelebracion != -1 && !_celeShown.value) {
+                      _celeShown.value = true;
+
+                      // Mostrar celebración primero
+                      Future.microtask(() async {
+                        try {
+                          await Get.dialog(
+                            const CelebracionDialog(),
+                            barrierDismissible: false,
+                          );
+
+                          // Marcar mostradaCelebracion = true en esa prueba
+                          pruebasList[idxCelebracion]['mostradaCelebracion'] = true;
+                          await FirebaseFirestore.instance
+                              .collection('groups')
+                              .doc(groupController.group.value!.codigo)
+                              .update({'pruebas': pruebasList});
+                        } catch (e, st) {
+                          debugPrint('❌ celebración novio: $e\n$st');
+                        } finally {
+                          _celeShown.value = false;
+                        }
+                      });
+
+                      // No seguimos con la prueba activa en el mismo frame;
+                      // dejamos que primero se muestre la celebración
+                      return const SizedBox.shrink();
+                    }
+
+                    // 2) Si no hay celebración pendiente (o ya se mostró), seguimos con tu lógica de prueba activa
                     final baseActivaIndex = pruebasList.indexWhere(
                       (p) => p['pruebaActiva'] == true && p['notificada'] != true,
                     );
 
-                    // Texto informativo (igual que en tu copia que funcionaba)
                     if (baseActivaIndex == -1) {
                       return const Positioned(
-                        bottom: 40, left: 20, right: 20,
+                        bottom: 100, left: 20, right: 90,
                         child: Text(
-                          'Aún no hay prueba activa.\nEspera a que te asignen una.',
+                          'Completa todas las pruebas.\nSi te atreves, claro.',
                           textAlign: TextAlign.center,
                           style: TextStyle(color: Colors.white, fontSize: 16),
                         ),
                       );
                     }
 
-                    if (_dialogShown.value) return const SizedBox.shrink();
+                    // Evitar solape con celebración o con otro diálogo
+                    if (_dialogShown.value || _celeShown.value) return const SizedBox.shrink();
                     _dialogShown.value = true;
 
                     final rawPrueba = pruebasList[baseActivaIndex]['prueba'];
@@ -318,10 +359,10 @@ class _HomeNovioScreenState extends State<HomeNovioScreen> {
                             titulo: titulo,
                             descripcion: descripcion,
                             baseIndex: baseActivaIndex,
-                            groupId: grupo.codigo,
+                            groupId: groupController.group.value!.codigo,
                           ),
                         );
-                        // marcar como notificada
+                        // marcar como notificada (tu lógica existente)
                         pruebasList[baseActivaIndex]['notificada'] = true;
                         await FirebaseFirestore.instance
                             .collection('groups')
@@ -337,6 +378,7 @@ class _HomeNovioScreenState extends State<HomeNovioScreen> {
                     return const SizedBox.shrink();
                   },
                 ),
+
               ],
             );
           },

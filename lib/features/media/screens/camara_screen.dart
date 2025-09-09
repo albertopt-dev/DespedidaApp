@@ -142,7 +142,7 @@ class CamaraScreen extends StatelessWidget {
                     ],
 
                     const Text(
-                      'Se guardará en la base actual',
+                      'Se guardará en la galería de la app \ny en la del dispositivo.',
                       style: TextStyle(color: Colors.white54, fontSize: 12),
                       textAlign: TextAlign.center,
                     ),

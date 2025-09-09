@@ -74,8 +74,9 @@ class RulesScreen extends StatelessWidget {
              _buildRule(
               icon: Icons.photo_library,
               title: "Galería de Pruebas",
-              description: "Cada prueba tiene su propia galería. Todas las fotos y vídeos que se suban quedarán guardados ahí como recuerdo."
+              description: "Cada prueba tiene su propia galería. Todas las fotos y vídeos que se suban quedarán guardados ahí como recuerdo. También se podrán descargar o eliminar."
             ),
+            const SizedBox(height: 30), 
           ],
         ),
       ),
