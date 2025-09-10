@@ -41,23 +41,54 @@ exports.enviarNotificacionAlNovio = onCall({ region: "us-central1" }, async (req
     return { success: false, reason: "NO_TOKENS" };
   }
 
-  const payload = {
+    const payload = {
     notification: {
       title: "🎉 Nueva prueba activada",
       body: "Tu grupo ha activado una nueva prueba. ¡Échale un ojo!",
     },
-    data: { type: "prueba" },
+    data: {
+      type: "prueba",
+      click_action: "FLUTTER_NOTIFICATION_CLICK",
+    },
     android: {
       priority: "high",
       notification: {
         channelId: "appdespedida_channel_v3",
-        sound: "notificacion",
+        sound: "notificacion", // <- nombre del raw en Android (SIN extensión)
       },
     },
     apns: {
-      payload: { aps: { sound: "notificacion" } },
+      headers: {
+        "apns-push-type": "alert",
+        "apns-priority": "10"
+      },
+      payload: {
+        aps: {
+          alert: {
+            title: "🎉 Nueva prueba activada",
+            body: "Tu grupo ha activado una nueva prueba. ¡Échale un ojo!"
+          },
+          sound: { name: "notificacion.aiff", volume: 1.0 }, // <- CON extensión y en bundle iOS
+          "interruption-level": "time-sensitive"
+        }
+      }
     },
+    webpush: {
+      notification: {
+        title: "🎉 Nueva prueba activada",
+        body: "Tu grupo ha activado una nueva prueba. ¡Échale un ojo!",
+        requireInteraction: true,
+        renotify: true,
+        tag: "trial-start",
+        icon: "/icons/icon-192.png",
+        badge: "/icons/badge.png"
+      },
+      fcmOptions: {
+        link: "https://despedidaapp-5524f.web.app/"
+      }
+    }
   };
+
 
   const res = await messaging.sendEachForMulticast({ tokens, ...payload });
 

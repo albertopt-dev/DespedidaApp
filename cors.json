@@ -1,0 +1,19 @@
+[
+  {
+    "origin": [
+      "https://despedidaapp-5524f.web.app",
+      "https://despedidaapp-5524f.firebaseapp.com",
+      "http://localhost:3000",
+      "http://localhost:5173",
+      "http://localhost:8080"
+    ],
+    "method": ["GET", "HEAD", "OPTIONS"],
+    "responseHeader": [
+      "Content-Type",
+      "Cache-Control",
+      "Content-Disposition",
+      "Access-Control-Allow-Origin"
+    ],
+    "maxAgeSeconds": 3600
+  }
+]

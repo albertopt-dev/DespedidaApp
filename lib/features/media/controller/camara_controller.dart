@@ -10,7 +10,7 @@ import 'package:despedida/features/media/services/gallery_service.dart';
 import 'package:despedida/web/io_stub.dart'
   if (dart.library.html) 'package:despedida/web/io_web.dart' as webio;
 import 'package:despedida/web/mime_detector.dart';
-
+import 'dart:typed_data';
 
 import 'package:media_scanner/media_scanner.dart';
 import 'package:gal/gal.dart'; // <- FALTABA
@@ -142,13 +142,27 @@ class CamaraController extends GetxController {
       final pick = await webio.capturePhotoWeb();
       if (pick == null) return;
 
-      final mime = DetectorMimeSafari.detectarTipoMime(
+      final mimeDet = DetectorMimeSafari.detectarTipoMime(
         nombreArchivo: pick.filename,
         mimeOriginal: pick.mime,
         bytes: pick.bytes,
       );
+      print('[WEB] capturarFotoWeb name=${pick.filename} mimeOrig=${pick.mime} mimeDet=$mimeDet bytes=${pick.bytes.length}');
 
-      print('[WEB] capturarFotoWeb name=${pick.filename} mimeOrig=${pick.mime} mimeDet=$mime bytes=${pick.bytes.length}');
+      // Forzamos JPEG si no lo es, para compatibilidad en Safari
+      Uint8List uploadBytes = pick.bytes;
+      String uploadFilename = pick.filename;
+      String uploadMime = mimeDet;
+
+      if (!uploadMime.toLowerCase().startsWith('image/jpeg')) {
+        final jpg = await webio.transcodeImageToJpegWeb(pick.bytes, quality: 0.9);
+        if (jpg != null && jpg.isNotEmpty) {
+          uploadBytes = jpg;
+          uploadMime = 'image/jpeg';
+          final dot = uploadFilename.lastIndexOf('.');
+          uploadFilename = (dot > 0 ? uploadFilename.substring(0, dot) : uploadFilename) + '.jpg';
+        }
+      }
 
       final uid = FirebaseAuth.instance.currentUser?.uid;
       if (uid == null) {
@@ -163,28 +177,17 @@ class CamaraController extends GetxController {
       await GalleryService().uploadBytesWeb(
         groupId: groupId,
         baseIndex: baseIndex,
-        bytes: pick.bytes,
-        filename: pick.filename,
-        mime: mime,
+        bytes: uploadBytes,
+        filename: uploadFilename,
+        mime: uploadMime,
         onProgress: (p) => uploadProgress.value = p,
       );
 
-      final tag = baseIndex != null ? 'gallery-$groupId-$baseIndex' : 'gallery-$groupId';
+      // refrescar galería
+      final tag = 'gallery-$groupId-$baseIndex';
       if (Get.isRegistered<GalleryController>(tag: tag)) {
         await Get.find<GalleryController>(tag: tag).loadInitial();
       }
-
-      // --- AÑADIR: ofrecer guardar en dispositivo (Share Sheet iOS / descarga fallback) ---
-      try {
-        await webio.saveToDeviceWeb(
-          bytes: pick.bytes,
-          filename: pick.filename,
-          mime: mime,
-        );
-      } catch (_) {
-        // silencioso: si falla share/descarga no rompemos la UX
-      }
-
 
       Get.snackbar('Listo', 'Foto subida');
     } catch (e, st) {
@@ -197,7 +200,6 @@ class CamaraController extends GetxController {
   }
 
 
-  // VÍDEO WEB
   Future<void> capturarVideoWeb() async {
     if (!kIsWeb) return;
     try {
@@ -209,10 +211,9 @@ class CamaraController extends GetxController {
         mimeOriginal: pick.mime,
         bytes: pick.bytes,
       );
-
       print('[WEB] capturarVideoWeb name=${pick.filename} mimeOrig=${pick.mime} mimeDet=$mime bytes=${pick.bytes.length}');
 
-      // ⛔️ Límite de duración (30s) en Web antes de subir
+      // Límite 30s antes de subir
       final dur = await webio.probeVideoDurationSeconds(pick.bytes, mime: mime);
       if (dur != null && dur > 30.0) {
         Get.snackbar('Límite de duración', 'El vídeo supera 30s');
@@ -238,22 +239,11 @@ class CamaraController extends GetxController {
         onProgress: (p) => uploadProgress.value = p,
       );
 
-      final tag = baseIndex != null ? 'gallery-$groupId-$baseIndex' : 'gallery-$groupId';
+      // refrescar galería
+      final tag = 'gallery-$groupId-$baseIndex';
       if (Get.isRegistered<GalleryController>(tag: tag)) {
         await Get.find<GalleryController>(tag: tag).loadInitial();
       }
-
-      // --- AÑADIR: ofrecer guardar en dispositivo (Share Sheet iOS / descarga fallback) ---
-      try {
-        await webio.saveToDeviceWeb(
-          bytes: pick.bytes,
-          filename: pick.filename,
-          mime: mime,
-        );
-      } catch (_) {
-        // silencioso
-      }
-
 
       Get.snackbar('Listo', 'Vídeo subido');
     } catch (e, st) {
@@ -264,6 +254,7 @@ class CamaraController extends GetxController {
       uploadProgress.value = 0;
     }
   }
+
 
 
   // DESDE GALERÍA WEB
@@ -314,5 +305,69 @@ class CamaraController extends GetxController {
       uploadProgress.value = 0;
     }
   }
+  
+  Future<void> _showDownloadCardWeb({
+    required String filename,
+    required String downloadUrl,
+  }) async {
+    await Get.dialog(
+      Center(
+        child: Container(
+          width: 320,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: const Color(0xFF0F2A33),
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: const [BoxShadow(blurRadius: 12, color: Colors.black54)],
+            border: Border.all(color: const Color(0xFF00E5FF), width: 1),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.download, color: Colors.white, size: 28),
+              const SizedBox(height: 12),
+              Text(
+                filename,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                '¿Quieres descargar este archivo?',
+                style: TextStyle(color: Colors.white70, fontSize: 13),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    child: const Text('Cancelar'),
+                    onPressed: () => Get.back(),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    child: const Text('Descargar'),
+                    onPressed: () {
+                      // Forzamos alert nativo de Safari (Descargar/Cancelar)
+                      webio.promptDownloadFromUrlWeb(downloadUrl, filename: filename);
+                      Get.back();
+                    },
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+      barrierDismissible: true,
+      barrierColor: Colors.black.withOpacity(0.45),
+    );
+  }
+
 
 }

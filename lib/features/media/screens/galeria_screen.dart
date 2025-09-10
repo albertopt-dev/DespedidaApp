@@ -14,6 +14,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import '../controller/gallery_controller.dart';
 import '../models/media_item.dart';
 import '../widgets/media_detail_view.dart';
+import 'package:despedida/debug/web_logger.dart';
 
 import 'package:despedida/web/io_stub.dart'
   if (dart.library.html) 'package:despedida/web/io_web.dart' as webio;
@@ -634,10 +635,19 @@ class GaleriaScreen extends StatelessWidget {
                     color: Colors.black12,
                     child: Center(child: CircularProgressIndicator()),
                   ),
-                  errorWidget: (_, __, ___) => const ColoredBox(
-                    color: Colors.black12,
-                    child: Icon(Icons.videocam),
-                  ),
+                  errorWidget: (_, url, err) {
+                    WebLogger.imageError(
+                      url: url,
+                      place: 'grid-video',
+                      itemId: item.id,
+                      extra: err.toString(),
+                    );
+                    return const ColoredBox(
+                      color: Colors.black12,
+                      child: Icon(Icons.videocam),
+                    );
+                  },
+
                 ),
                 const Positioned(
                   right: 6, bottom: 6,
@@ -693,55 +703,115 @@ class GaleriaScreen extends StatelessWidget {
 
 
     if (kIsWeb) {
-      // HEIC/HEIF en Web NO Safari: no decodificar → fallback
-      if (item.isImage && item.isHeicLike && !webio.isSafari) {
-        return InkWell(
-          onTap: () {
-            Get.to(() => MediaDetailView(
-                  items: [item],
-                  initialIndex: 0,
-                  tagBase: 'gallery',
-                ));
-          },
-          child: Container(
-            color: Colors.black12,
-            child: const Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.image_not_supported,
-                      size: 28, color: Colors.white70),
-                  SizedBox(height: 4),
-                  Text('HEIC no compatible',
-                      style: TextStyle(color: Colors.white70, fontSize: 11)),
-                  Text('Toca para ver/descargar',
-                      style: TextStyle(color: Colors.white38, fontSize: 10)),
-                ],
-              ),
+    // 1) Si el MIME dice que es VÍDEO pero el 'type' no, trátalo como vídeo para no intentar <img> del mp4/mov
+    final isVideoByMime = (item.contentType ?? '').toLowerCase().startsWith('video/');
+    if (!item.isVideo && isVideoByMime) {
+      final thumb = item.thumbnailURL;
+      if (thumb != null && thumb.isNotEmpty) {
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.network(
+              thumb,
+              fit: BoxFit.cover,
+              gaplessPlayback: true,
+              errorBuilder: (_, err, __) {
+                print('[WEB][image-error][grid-video-thumb] url=$thumb err=$err');
+                return const ColoredBox(
+                  color: Colors.black12,
+                  child: Icon(Icons.videocam),
+                );
+              },
+            ),
+            const Positioned(
+              right: 6, bottom: 6,
+              child: Icon(Icons.play_circle_fill, size: 22, color: Colors.white70),
+            ),
+          ],
+        );
+
+      } else {
+        // Sin miniatura: NO intentes pintar el vídeo como imagen
+        return Container(
+          color: Colors.black12,
+          child: const Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.videocam, size: 28, color: Colors.white70),
+                SizedBox(height: 4),
+                Text('Miniatura no disponible',
+                    style: TextStyle(color: Colors.white54, fontSize: 10)),
+              ],
             ),
           ),
         );
       }
+    }
 
-      // Resto: usa <img> nativo (HtmlImage) y SIN Hero en Web
-      return CachedNetworkImage(
-        imageUrl: item.thumbnailURL ?? item.downloadURL,
-        fit: BoxFit.cover,
-        imageRenderMethodForWeb: ImageRenderMethodForWeb.HtmlImage,
-        placeholder: (_, __) => const ColoredBox(
-          color: Colors.black12,
-          child: Center(child: CircularProgressIndicator()),
-        ),
-        errorWidget: (_, url, err) {
-          // ignore: avoid_print
-          print('[WEB][image-error][grid] url=$url error=$err');
-          return const ColoredBox(
-            color: Colors.black12,
-            child: Icon(Icons.image_not_supported),
-          );
+    // 2) HEIC/HEIF en Web: fallback universal (incluye Safari)
+    if (item.isHeicLike) {
+      return InkWell(
+        onTap: () {
+          Get.to(() => MediaDetailView(
+                items: [item],
+                initialIndex: 0,
+                tagBase: 'gallery',
+              ));
         },
+        child: Container(
+          color: Colors.black12,
+          child: const Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.image_not_supported, size: 28, color: Colors.white70),
+                SizedBox(height: 4),
+                Text('HEIC no compatible',
+                    style: TextStyle(color: Colors.white70, fontSize: 11)),
+                Text('Toca para ver/descargar',
+                    style: TextStyle(color: Colors.white38, fontSize: 10)),
+              ],
+            ),
+          ),
+        ),
       );
     }
+
+    // Usamos SIEMPRE derivados JPEG en Web si existen
+    final baseUrl = item.thumbnailURL ?? item.displayURL ?? item.downloadURL;
+    // Último recurso: fuerza inline para el original (por si es legacy)
+    final gridUrl = (item.thumbnailURL == null && item.displayURL == null)
+        ? webio.forceInlineImageUrl(baseUrl, contentType: 'image/jpeg', filename: 'image.jpg')
+        : baseUrl;
+
+
+    return CachedNetworkImage(
+      imageUrl: gridUrl,
+      fit: BoxFit.cover,
+      imageRenderMethodForWeb: ImageRenderMethodForWeb.HtmlImage,
+      fadeInDuration: const Duration(milliseconds: 120),
+      placeholder: (_, __) => const ColoredBox(
+        color: Colors.black12,
+        child: Center(child: CircularProgressIndicator()),
+      ),
+      errorWidget: (_, url, err) {
+        WebLogger.imageError(
+          url: url,
+          place: 'grid-image',
+          itemId: item.id,
+          extra: err.toString(),
+        );
+        return const ColoredBox(
+          color: Colors.black12,
+          child: Icon(Icons.image_not_supported),
+        );
+      },
+    );
+
+
+  }
+
 
     // ANDROID/iOS: mantenemos Hero
     return Hero(

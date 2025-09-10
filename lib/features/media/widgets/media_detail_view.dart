@@ -10,6 +10,8 @@ import 'package:despedida/web/io_stub.dart'
   if (dart.library.html) 'package:despedida/web/io_web.dart' as webio;
 
 import '../models/media_item.dart';
+import 'package:despedida/debug/web_logger.dart';
+
 
 class MediaDetailView extends StatefulWidget {
   const MediaDetailView({
@@ -70,7 +72,14 @@ class _MediaDetailViewState extends State<MediaDetailView> {
         actions: [
           IconButton(
             icon: const Icon(Icons.share),
-            onPressed: () => Share.share(item.downloadURL),
+            onPressed: () {
+              final media = widget.items[_index];
+              final shareUrl = (kIsWeb && media.type == 'image')
+                  ? (media.displayURL ?? media.downloadURL)
+                  : media.downloadURL;
+              Share.share(shareUrl);
+            },
+
           ),
         ],
       ),
@@ -91,41 +100,40 @@ class _MediaDetailViewState extends State<MediaDetailView> {
             Widget content;
             if (it.type == 'image') {
               if (kIsWeb) {
-                final isHeic = ((it.contentType?.contains('heic') ?? false) ||
-                                (it.contentType?.contains('heif') ?? false) ||
-                                it.ext == 'heic' || it.ext == 'heif');
-                // HEIC/HEIF en Web no-Safari -> fallback (no intentar decodificar)
-                if (isHeic && !webio.isSafari) {
-                  content = const _HeicNoPreview();
-                } else {
-                  content = CachedNetworkImage(
-                    imageUrl: it.downloadURL,
-                    fit: BoxFit.contain,
-                    imageRenderMethodForWeb: ImageRenderMethodForWeb.HtmlImage,
-                    useOldImageOnUrlChange: true,
-                    fadeInDuration: const Duration(milliseconds: 120),
-                    placeholder: (ctx, __) => const SizedBox(
-                      width: 36, height: 36,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                    errorWidget: (ctx, url, err) {
-                      // ignore: avoid_print
-                      print('[WEB][image-error][detail] url=$url error=$err');
-                      return const Icon(Icons.broken_image_outlined,
-                          size: 40, color: Colors.white54);
-                    },
-                  );
-                }
+              // En Web usamos SIEMPRE el derivado JPEG si existe (displayURL).
+              // Si por lo que sea no existe, caemos al downloadURL SOLO si no es HEIC/HEIF.
+              final bool heicLike = ((it.contentType?.contains('heic') ?? false) ||
+                                    (it.contentType?.contains('heif') ?? false) ||
+                                    it.ext == 'heic' || it.ext == 'heif');
+
+              
+              final String? viewUrl = it.displayURL ?? (heicLike ? null : it.downloadURL);
+
+              if (viewUrl == null) {
+                content = const _HeicNoPreview();
               } else {
-                // Android/iOS => PhotoView
-                content = PhotoView(
-                  backgroundDecoration:
-                      const BoxDecoration(color: Colors.transparent),
-                  imageProvider: CachedNetworkImageProvider(it.downloadURL),
-                  minScale: PhotoViewComputedScale.contained,
-                  maxScale: PhotoViewComputedScale.covered * 3,
+                content = Image.network(
+                  viewUrl,
+                  fit: BoxFit.contain,
+                  gaplessPlayback: true,
+                  errorBuilder: (_, err, __) {
+                    print('[WEB][image-error][detail] url=$viewUrl err=$err');
+                    return const Icon(Icons.broken_image_outlined,
+                        size: 40, color: Colors.white54);
+                  },
                 );
               }
+            } else {
+              // Android/iOS => PhotoView (sin cambios)
+              content = PhotoView(
+                backgroundDecoration:
+                    const BoxDecoration(color: Colors.transparent),
+                imageProvider: CachedNetworkImageProvider(it.downloadURL),
+                minScale: PhotoViewComputedScale.contained,
+                maxScale: PhotoViewComputedScale.covered * 3,
+              );
+            }
+
             } else {
               // Vídeo
               content = (_vpc == null)

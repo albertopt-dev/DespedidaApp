@@ -25,3 +25,19 @@ Future<void> saveToDeviceWeb({
   required String mime,
 }) async {}
 Future<double?> probeVideoDurationSeconds(Uint8List bytes, {String? mime}) async => null;
+Future<Uint8List?> generateVideoThumbnailWeb(Uint8List bytes, {String? mime}) async => null;
+void promptDownloadFromUrlWeb(String url, {required String filename}) {
+  // no-op fuera de web
+}
+
+Future<Uint8List?> transcodeImageToJpegWeb(Uint8List bytes, {double quality = 0.9}) async => null;
+
+String forceInlineImageUrl(String url, {String? contentType, String? filename}) => url;
+
+Future<Uint8List?> makeImageThumbnailJpegWeb(
+  Uint8List bytes, {
+  int maxWidth = 480,
+  double quality = 0.8,
+}) async => null;
+
+

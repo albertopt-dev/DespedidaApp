@@ -354,12 +354,14 @@ Future<PickResult?> _pickWith({
 
 // API pública (igual que la tuya)
 Future<PickResult?> pickAnyFileWeb()  => _pickWith(accept: 'image/*,video/*');
-Future<PickResult?> capturePhotoWeb() => _pickWith(accept: 'image/*',  capture: 'environment');
 Future<PickResult?> captureVideoWeb() => _pickWith(accept: 'video/*',  capture: 'environment');
-// GALERÍA (solo fotos): sin 'capture' para no abrir cámara
-Future<PickResult?> pickImagesFromLibrary() {
-  return _pickWith(accept: 'image/*', capture: null);
-}
+// Forzamos formatos que Safari renderiza seguro en <img>
+Future<PickResult?> capturePhotoWeb() =>
+    _pickWith(accept: 'image/jpeg,image/png', capture: 'environment');
+
+Future<PickResult?> pickImagesFromLibrary() =>
+    _pickWith(accept: 'image/jpeg,image/png', capture: null);
+
 
 // GALERÍA (solo vídeos): sin 'capture'
 Future<PickResult?> pickVideosFromLibrary() {
@@ -411,6 +413,77 @@ Future<double?> probeVideoDurationSeconds(Uint8List bytes, {String? mime}) async
   }
 }
 
+// Genera una miniatura JPG desde bytes de vídeo en cliente (Safari/Chrome)
+Future<Uint8List?> generateVideoThumbnailWeb(Uint8List bytes, {String? mime}) async {
+  try {
+    final blob = html.Blob([bytes], mime ?? 'video/mp4');
+    final url = html.Url.createObjectUrlFromBlob(blob);
+
+    final video = html.VideoElement()
+      ..preload = 'metadata'
+      ..src = url
+      ..muted = true;
+    // iOS Safari necesita playsinline para no forzar fullscreen; en dart:html no hay setter tipado
+    try {
+      video.setAttribute('playsinline', 'true');          // atributo HTML
+      js_util.setProperty(video, 'playsInline', true);    // propiedad JS (por si acaso)
+    } catch (_) {
+      // silencioso
+    }
+
+
+    final completer = Completer<Uint8List?>();
+    late StreamSubscription loaded;
+    late StreamSubscription err;
+
+    void cleanup() {
+      try { loaded.cancel(); } catch (_) {}
+      try { err.cancel(); } catch (_) {}
+      try { video.src = ''; } catch (_) {}
+      try { html.Url.revokeObjectUrl(url); } catch (_) {}
+    }
+
+    loaded = video.onLoadedMetadata.listen((_) async {
+      try {
+        // Tomamos frame al segundo 1 (si dura menos, al final)
+        final target = (video.duration.isFinite && video.duration > 1) ? 1.0 : 0.0;
+        video.currentTime = target;
+
+        await video.onSeeked.first.timeout(const Duration(seconds: 2));
+
+        final canvas = html.CanvasElement(width: video.videoWidth, height: video.videoHeight);
+        final ctx = canvas.context2D;
+        ctx.drawImage(video, 0, 0);
+
+        final dataUrl = canvas.toDataUrl('image/jpeg', 0.7); // "data:image/jpeg;..."
+        final comma = dataUrl.indexOf(',');
+        if (comma != -1) {
+          final b64 = dataUrl.substring(comma + 1);
+          final bytesThumb = base64Decode(b64);
+          completer.complete(bytesThumb);
+        } else {
+          completer.complete(null);
+        }
+      } catch (_) {
+        completer.complete(null);
+      } finally {
+        cleanup();
+      }
+    });
+
+    err = video.onError.listen((_) {
+      cleanup();
+      completer.complete(null);
+    });
+
+    return await completer.future
+        .timeout(const Duration(seconds: 8), onTimeout: () => null);
+  } catch (_) {
+    return null;
+  }
+}
+
+
 
 // --- Guardar en dispositivo (Share Sheet en iOS/Android web; fallback: descarga) ---
 Future<void> saveToDeviceWeb({
@@ -418,44 +491,178 @@ Future<void> saveToDeviceWeb({
   required String filename,
   required String mime,
 }) async {
-  // Construir Blob y File
+  // Blob + object URL
   final blob = html.Blob([bytes], mime);
-  final file = html.File([blob], filename, {'type': mime});
-
-  // Intentar Web Share API con archivos (iOS 15+/16+ lo soporta en Safari)
-  final nav = html.window.navigator as dynamic;
-  try {
-    final canShare = js_util.hasProperty(nav, 'canShare') &&
-        (js_util.callMethod(nav, 'canShare', [
-          js_util.jsify({'files': [file]})
-        ]) as bool);
-
-    if (canShare && js_util.hasProperty(nav, 'share')) {
-      await js_util.promiseToFuture(js_util.callMethod(nav, 'share', [
-        js_util.jsify({
-          'files': [file],
-          'title': filename,
-          'text': mime.startsWith('image/')
-              ? 'Imagen'
-              : (mime.startsWith('video/') ? 'Vídeo' : 'Archivo')
-        })
-      ]));
-      return; // Compartido (el usuario puede "Guardar imagen/vídeo")
-    }
-  } catch (_) {
-    // seguimos a fallback
-  }
-
-  // Fallback universal: forzar descarga (el usuario puede guardarlo en Archivos/Fotos)
   final url = html.Url.createObjectUrlFromBlob(blob);
   try {
-    final a = html.AnchorElement(href: url)..download = filename;
-    a.style.display = 'none';
+    // <a download="filename"> + click → muestra el diálogo nativo de descarga en Safari
+    final a = html.AnchorElement(href: url)
+      ..download = filename
+      ..style.display = 'none'
+      ..target = '_self'; // evita abrir nueva pestaña
     html.document.body?.append(a);
-    a.click();
+    a.click(); // <-- gesto simulado
     a.remove();
   } finally {
     html.Url.revokeObjectUrl(url);
   }
 }
+
+
+// Convierte bytes de imagen a JPEG (calidad 0.9). Devuelve null si falla.
+Future<Uint8List?> transcodeImageToJpegWeb(Uint8List bytes, {double quality = 0.9}) async {
+  try {
+    final blob = html.Blob([bytes]);
+    final url = html.Url.createObjectUrlFromBlob(blob);
+    final img = html.ImageElement(src: url);
+    final completer = Completer<Uint8List?>();
+
+    img.onError.first.then((_) {
+      html.Url.revokeObjectUrl(url);
+      completer.complete(null);
+    });
+
+    img.onLoad.first.then((_) {
+      try {
+        final canvas = html.CanvasElement(width: img.width, height: img.height);
+        final ctx = canvas.context2D;
+        ctx.drawImageScaled(img, 0, 0, img.width!, img.height!);
+        final dataUrl = canvas.toDataUrl('image/jpeg', quality);
+        final comma = dataUrl.indexOf(',');
+        Uint8List? out;
+        if (comma != -1) {
+          final b64 = dataUrl.substring(comma + 1);
+          out = base64Decode(b64);
+        }
+        html.Url.revokeObjectUrl(url);
+        completer.complete(out);
+      } catch (_) {
+        html.Url.revokeObjectUrl(url);
+        completer.complete(null);
+      }
+    });
+
+    return await completer.future.timeout(const Duration(seconds: 8), onTimeout: () => null);
+  } catch (_) {
+    return null;
+  }
+}
+
+  // Genera miniatura JPEG redimensionando por maxWidth (mantiene aspecto)
+  /// Genera una miniatura JPEG desde bytes de imagen en el cliente (Web).
+/// - Redimensiona respetando el aspecto hasta maxWidth (si la imagen es más grande).
+/// - Devuelve null si falla.
+/// - Safari-friendly (usa <canvas>.toDataUrl('image/jpeg')).
+Future<Uint8List?> makeImageThumbnailJpegWeb(
+  Uint8List bytes, {
+  int maxWidth = 480,
+  double quality = 0.8,
+}) async {
+  try {
+    final blob = html.Blob([bytes]);
+    final url = html.Url.createObjectUrlFromBlob(blob);
+    final img = html.ImageElement(src: url);
+
+    final completer = Completer<Uint8List?>();
+
+    void cleanup() {
+      try { html.Url.revokeObjectUrl(url); } catch (_) {}
+    }
+
+    img.onError.first.then((_) {
+      cleanup();
+      completer.complete(null);
+    });
+
+    img.onLoad.first.then((_) {
+      try {
+        final iw = img.width ?? 0;
+        final ih = img.height ?? 0;
+        if (iw <= 0 || ih <= 0) {
+          cleanup();
+          completer.complete(null);
+          return;
+        }
+
+        // Calcula dimensiones destino manteniendo aspecto
+        int dw = iw;
+        int dh = ih;
+        if (iw > maxWidth) {
+          dw = maxWidth;
+          dh = ((ih * (maxWidth / iw))).round();
+        }
+
+        final canvas = html.CanvasElement(width: dw, height: dh);
+        final ctx = canvas.context2D;
+        ctx.drawImageScaled(img, 0, 0, dw, dh);
+
+        final dataUrl = canvas.toDataUrl('image/jpeg', quality);
+        final comma = dataUrl.indexOf(',');
+        if (comma != -1) {
+          final b64 = dataUrl.substring(comma + 1);
+          final out = base64Decode(b64);
+          cleanup();
+          completer.complete(out);
+        } else {
+          cleanup();
+          completer.complete(null);
+        }
+      } catch (_) {
+        cleanup();
+        completer.complete(null);
+      }
+    });
+
+    return await completer.future
+        .timeout(const Duration(seconds: 8), onTimeout: () => null);
+  } catch (_) {
+    return null;
+  }
+}
+
+
+
+void promptDownloadFromUrlWeb(String url, {required String filename}) {
+  try {
+    final u = Uri.parse(url);
+    final qp = Map<String, String>.from(u.queryParameters);
+    // Fuerza Content-Disposition por query (GCS/Firebase Storage lo soporta)
+    qp['response-content-disposition'] = 'attachment; filename="$filename"';
+    // Conserva todos los params existentes (token, alt=media, etc.)
+    final forced = u.replace(queryParameters: qp).toString();
+
+    final a = html.AnchorElement(href: forced)
+      ..download = filename
+      ..target = '_self'
+      ..style.display = 'none';
+    html.document.body?.append(a);
+    a.click();
+    a.remove();
+  } catch (_) {
+    // silencioso
+  }
+}
+
+// Devuelve URL para <img> asegurando inline y content-type correcto (Safari-friendly)
+  String forceInlineImageUrl(String url, {String? contentType, String? filename}) {
+    try {
+      final u = Uri.parse(url);
+      final qp = Map<String, String>.from(u.queryParameters);
+
+      if (contentType != null && contentType.isNotEmpty) {
+        qp['response-content-type'] = contentType; // ej: image/jpeg
+      }
+      final name = (filename == null || filename.isEmpty) ? 'image.jpg' : filename;
+      qp['response-content-disposition'] = 'inline; filename="$name"';
+
+      if (!qp.containsKey('alt')) qp['alt'] = 'media';
+
+      return u.replace(queryParameters: qp).toString();
+    } catch (_) {
+      return url; // fallback
+    }
+  }
+
+
+
 

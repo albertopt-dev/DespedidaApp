@@ -11,6 +11,8 @@ class MediaItem {
   final String downloadURL;
   final DateTime createdAt;
   final String? thumbnailURL;
+  final String? displayURL; // <-- NUEVO: imagen grande "web-safe" (JPEG)
+
   final num? durationSec;
 
   // 👇 NUEVO
@@ -26,6 +28,7 @@ class MediaItem {
     required this.storagePath,
     required this.downloadURL,
     required this.createdAt,
+    this.displayURL,
     this.thumbnailURL,
     this.durationSec,
     this.contentType, // nuevo
@@ -41,6 +44,23 @@ class MediaItem {
     return ct.contains('heic') || ct.contains('heif') || e == 'heic' || e == 'heif';
   }
 
+  // Detección reforzada para Web, por si 'type' vino mal de Firestore:
+  bool get isVideoLike {
+    final ct = (contentType ?? '').toLowerCase();
+    final e  = (ext ?? '').toLowerCase();
+    if (isVideo) return true;
+    if (ct.startsWith('video/')) return true;
+    return e == 'mp4' || e == 'mov' || e == 'webm' || e == 'mkv';
+  }
+
+  bool get isImageLike {
+    final ct = (contentType ?? '').toLowerCase();
+    final e  = (ext ?? '').toLowerCase();
+    if (isImage) return true;
+    if (ct.startsWith('image/')) return true;
+    return e == 'jpg' || e == 'jpeg' || e == 'png' || e == 'gif' || e == 'webp' || e == 'heic' || e == 'heif';
+  }
+
   // Fecha formateada (versión simple)
   String get createdAtFormatted {
     try {
@@ -51,7 +71,7 @@ class MediaItem {
   }
 
   factory MediaItem.fromDoc(String id, Map<String, dynamic> d) {
-    return MediaItem(
+      return MediaItem(
       id: id,
       groupId: d['groupId'] as String,
       baseIndex: d['baseIndex'],
@@ -59,10 +79,15 @@ class MediaItem {
       type: d['type'] as String,
       storagePath: d['storagePath'] as String,
       downloadURL: d['downloadURL'] as String,
-      createdAt: (d['createdAt'] as Timestamp).toDate(),
+      createdAt: (() {
+        final v = d['createdAt'];
+        if (v is Timestamp) return v.toDate();
+        return DateTime.now();
+      })(),
+      displayURL: d['displayURL'] as String?,  // <— AÑADIR
+
       thumbnailURL: d['thumbnailURL'],
       durationSec: d['durationSec'],
-      // 👇 lee lo que ya guardas en Firestore
       contentType: d['contentType'],
       ext: d['ext'],
     );
@@ -80,5 +105,6 @@ class MediaItem {
         if (durationSec != null) 'durationSec': durationSec,
         if (contentType != null) 'contentType': contentType, // nuevo
         if (ext != null) 'ext': ext,                         // nuevo
+        if (displayURL != null) 'displayURL': displayURL, // <-- NUEVO
       };
 }

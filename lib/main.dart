@@ -56,10 +56,17 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 Future<void> _ensureAndroidNotificationPermission() async {
   if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
 
-  // Evitamos dart:io y permission_handler aquí para no romper Web.
-  // Usa permission_handler en Android si ya lo tienes integrado en otra parte.
-  // Si quieres mantenerlo, muévelo a un servicio solo-Android.
+  // Android 13+: este método de FCM muestra el diálogo del SO.
+  final settings = await FirebaseMessaging.instance.requestPermission(
+    alert: true,
+    badge: true,
+    sound: true,
+  );
+  // ignore: avoid_print
+  print('🔔 Android notification permission: ${settings.authorizationStatus}');
 }
+
+
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -207,7 +214,7 @@ class _MyAppState extends State<MyApp> {
   }
 
   // ===== Helpers: notificaciones locales (Android) =====
-  Future<void> _mostrarNotificacionNovio(String titulo, String mensaje) async {
+    Future<void> _mostrarNotificacionNovio(String titulo, String mensaje) async {
     if (kIsWeb) return; // Web no soporta flutter_local_notifications
     await flutterLocalNotificationsPlugin.show(
       DateTime.now().millisecondsSinceEpoch ~/ 1000,
@@ -221,11 +228,18 @@ class _MyAppState extends State<MyApp> {
           importance: Importance.max,
           priority: Priority.high,
           playSound: true,
-          sound: RawResourceAndroidNotificationSound('notificacion'),
+          sound: RawResourceAndroidNotificationSound('notificacion'), // res/raw/notificacion.mp3
+        ),
+        iOS: DarwinNotificationDetails(
+          presentAlert: true,
+          presentBadge: true,
+          presentSound: true,
+          sound: 'notificacion.aiff', // debe existir en el bundle iOS
         ),
       ),
     );
   }
+
 
   Future<void> _mostrarNotificacionChat(String titulo, String mensaje) async {
     if (kIsWeb) return;

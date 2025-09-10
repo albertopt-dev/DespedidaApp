@@ -499,8 +499,6 @@ class GalleryService {
     Get.snackbar('Subido', 'Vídeo subido', snackPosition: SnackPosition.BOTTOM);
   }
 
-  // En GalleryService
-  // dentro de class GalleryService
   Future<void> uploadBytesWeb({
     required String groupId,
     int? baseIndex,
@@ -515,7 +513,7 @@ class GalleryService {
     final ts = DateTime.now().millisecondsSinceEpoch;
     final folderBase = baseIndex == null ? 'general' : '$baseIndex';
 
-    // saca extensión desde contentType o nombre
+    // extensión desde MIME o nombre
     String ext = _extFromContentType(mime) ?? (() {
       final n = filename.toLowerCase();
       final i = n.lastIndexOf('.');
@@ -526,7 +524,19 @@ class GalleryService {
 
     try {
       final ref = _storage.ref(storagePath);
-      final task = ref.putData(bytes, SettableMetadata(contentType: mime));
+      final isImage = mime.startsWith('image/');
+
+      // Subida principal
+      final task = ref.putData(
+        bytes,
+        SettableMetadata(
+          contentType: mime,
+          cacheControl: 'public, max-age=3600',
+          contentDisposition: isImage
+              ? 'inline; filename="$filename"'
+              : 'attachment; filename="$filename"',
+        ),
+      );
 
       await for (final s in task.snapshotEvents) {
         final p = s.totalBytes == 0 ? 0.0 : s.bytesTransferred / s.totalBytes;
@@ -534,6 +544,163 @@ class GalleryService {
       }
 
       final url = await ref.getDownloadURL();
+
+      // ===== Derivados una sola vez =====
+      String? thumbUrl;
+      String? displayUrl;
+
+      if (mime.startsWith('image/')) {
+        // Miniatura (≈480px) y Display (≈2000px) como JPEG “Safari-safe”
+        try {
+          final thumbBytes = await webio.makeImageThumbnailJpegWeb(bytes, maxWidth: 480, quality: 0.8);
+          if (thumbBytes != null && thumbBytes.isNotEmpty) {
+            final tRef = _storage.ref('$storagePath.thumb.jpg');
+            await tRef.putData(
+              thumbBytes,
+              SettableMetadata(
+                contentType: 'image/jpeg',
+                cacheControl: 'public, max-age=3600',
+                contentDisposition: 'inline; filename="thumb.jpg"',
+              ),
+            );
+            thumbUrl = await tRef.getDownloadURL();
+          }
+
+          final dispBytes = await webio.makeImageThumbnailJpegWeb(bytes, maxWidth: 2000, quality: 0.85);
+          if (dispBytes != null && dispBytes.isNotEmpty) {
+            final dRef = _storage.ref('$storagePath.display.jpg');
+            await dRef.putData(
+              dispBytes,
+              SettableMetadata(
+                contentType: 'image/jpeg',
+                cacheControl: 'public, max-age=86400',
+                contentDisposition: 'inline; filename="display.jpg"',
+              ),
+            );
+            displayUrl = await dRef.getDownloadURL();
+          }
+        } catch (_) {/* silencioso */}
+      } else if (mime.startsWith('video/')) {
+        // Miniatura de vídeo
+        try {
+          final vThumb = await webio.generateVideoThumbnailWeb(bytes, mime: mime);
+          if (vThumb != null && vThumb.isNotEmpty) {
+            final vRef = _storage.ref('$storagePath.thumb.jpg');
+            await vRef.putData(
+              vThumb,
+              SettableMetadata(
+                contentType: 'image/jpeg',
+                cacheControl: 'public, max-age=3600',
+                contentDisposition: 'inline; filename="thumb.jpg"',
+              ),
+            );
+            thumbUrl = await vRef.getDownloadURL();
+          }
+        } catch (_) {}
+      }
+
+      // Guarda UN SOLO documento (incluye displayURL y thumbnailURL)
+      await _db.collection('groups').doc(groupId).collection('media').add({
+        'groupId': groupId,
+        'baseIndex': baseIndex,
+        'ownerUid': uid,
+        'type': mime.startsWith('image/')
+            ? 'image'
+            : (mime.startsWith('video/') ? 'video' : 'file'),
+        'storagePath': storagePath,
+        'downloadURL': url,
+        'thumbnailURL': thumbUrl,
+        'displayURL': displayUrl,     // 👈 importante para Safari
+        'contentType': mime,
+        'ext': ext,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+    } on FirebaseException catch (e, st) {
+      print('[WEB] uploadBytesWeb FirebaseException: ${e.code} ${e.message}\n$st');
+      rethrow;
+    } catch (e, st) {
+      print('[WEB] uploadBytesWeb ERROR: $e\n$st');
+      rethrow;
+    }
+  }
+
+
+
+  Future<String?> uploadBytesWebWithUrl({
+    required String groupId,
+    int? baseIndex,
+    required Uint8List bytes,
+    required String filename,
+    required String mime,
+    void Function(double p)? onProgress,
+  }) async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) throw StateError('User not signed in');
+
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    final folderBase = baseIndex == null ? 'general' : '$baseIndex';
+
+    String ext = _extFromContentType(mime) ?? (() {
+      final n = filename.toLowerCase();
+      final i = n.lastIndexOf('.');
+      return i >= 0 ? n.substring(i + 1) : 'bin';
+    })();
+
+    final storagePath = 'uploads/groups/$groupId/bases/$folderBase/${ts}_$uid.$ext';
+
+    try {
+      final ref = _storage.ref(storagePath);
+      final isImage = mime.startsWith('image/');
+      final task = ref.putData(
+        bytes,
+        SettableMetadata(
+          contentType: mime,
+          cacheControl: 'public, max-age=3600',
+          contentDisposition: isImage
+              ? 'inline; filename="$filename"'
+              : 'attachment; filename="$filename"',
+        ),
+      );
+
+      await for (final s in task.snapshotEvents) {
+        final p = s.totalBytes == 0 ? 0.0 : s.bytesTransferred / s.totalBytes;
+        onProgress?.call(p.clamp(0.0, 1.0));
+      }
+
+      final url = await ref.getDownloadURL();
+
+      // ---- Miniatura (una sola variable y un solo bloque) ----
+      String? thumbUrl;
+      if (mime.startsWith('image/')) {
+        try {
+          final thumbBytes = await webio.makeImageThumbnailJpegWeb(bytes, maxWidth: 480, quality: 0.8);
+          if (thumbBytes != null && thumbBytes.isNotEmpty) {
+            final thumbRef = _storage.ref('$storagePath.thumb.jpg');
+            await thumbRef.putData(
+              thumbBytes,
+              SettableMetadata(
+                contentType: 'image/jpeg',
+                cacheControl: 'public, max-age=3600',
+                contentDisposition: 'inline; filename="thumb.jpg"',
+              ),
+            );
+            thumbUrl = await thumbRef.getDownloadURL();
+          }
+        } catch (_) {}
+      } else if (mime.startsWith('video/')) {
+        try {
+          final thumbBytes = await webio.generateVideoThumbnailWeb(bytes, mime: mime);
+          if (thumbBytes != null && thumbBytes.isNotEmpty) {
+            final thumbRef = _storage.ref('$storagePath.thumb.jpg');
+            await thumbRef.putData(
+              thumbBytes,
+              SettableMetadata(contentType: 'image/jpeg'),
+            );
+            thumbUrl = await thumbRef.getDownloadURL();
+          }
+        } catch (_) {}
+      }
 
       await _db.collection('groups').doc(groupId).collection('media').add({
         'groupId': groupId,
@@ -544,20 +711,24 @@ class GalleryService {
             : (mime.startsWith('video/') ? 'video' : 'file'),
         'storagePath': storagePath,
         'downloadURL': url,
+        'thumbnailURL': thumbUrl,
         'contentType': mime,
         'ext': ext,
         'createdAt': FieldValue.serverTimestamp(),
       });
+
+      return url; // para tu diálogo/tarjeta de descarga si lo usas
     } on FirebaseException catch (e, st) {
       // ignore: avoid_print
-      print('[WEB] uploadBytesWeb FirebaseException: ${e.code} ${e.message}\n$st');
+      print('[WEB] uploadBytesWebWithUrl FirebaseException: ${e.code} ${e.message}\n$st');
       rethrow;
     } catch (e, st) {
       // ignore: avoid_print
-      print('[WEB] uploadBytesWeb ERROR: $e\n$st');
+      print('[WEB] uploadBytesWebWithUrl ERROR: $e\n$st');
       rethrow;
     }
   }
+
 
 
 }
