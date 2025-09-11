@@ -2,7 +2,7 @@ name: despedida
 description: "Proyecto para una app de despedidas de soltero/a"
 publish_to: 'none'
 
-version: 1.0.0+2
+version: 1.0.0+3
 
 environment:
   sdk: ^3.8.1
