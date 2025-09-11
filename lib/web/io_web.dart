@@ -9,6 +9,7 @@ import 'dart:convert';
 import 'dart:html' as html;
 import 'dart:js_util' as js_util;
 import 'dart:typed_data';
+import 'package:http/http.dart' as http;
 
 class PickResult {
   final Uint8List bytes;
@@ -663,6 +664,41 @@ void promptDownloadFromUrlWeb(String url, {required String filename}) {
     }
   }
 
+/// Descarga un archivo en Web usando el navegador.
+/// - Si el servidor permite CORS (lo tienes en Storage), usa fetch -> Blob -> <a download>.
+/// - filename: opcional; si no se indica, se deduce del path.
+Future<void> downloadFileWeb(String url, {String? filename}) async {
+  try {
+    // 1) Descargar bytes (respeta CORS de tu bucket; ya lo tienes configurado)
+    final res = await http.get(Uri.parse(url));
+    if (res.statusCode != 200) {
+      throw Exception('HTTP ${res.statusCode}');
+    }
 
+    // 2) Crear Blob y Object URL
+    final blob = html.Blob([res.bodyBytes]);
+    final objectUrl = html.Url.createObjectUrlFromBlob(blob);
+
+    // 3) Crear <a download> y hacer click programático
+    final a = html.AnchorElement(href: objectUrl)
+      ..download = filename ?? _inferNameFromUrl(url)
+      ..style.display = 'none';
+    html.document.body?.append(a);
+    a.click();
+    a.remove();
+
+    // 4) Liberar URL temporal
+    html.Url.revokeObjectUrl(objectUrl);
+  } catch (e) {
+    // Si algo falla (CORS o similar), como fallback abre en nueva pestaña
+    html.window.open(url, '_blank');
+  }
+}
+
+String _inferNameFromUrl(String url) {
+  final noQuery = url.split('?').first;
+  final last = noQuery.split('/').last;
+  return last.isEmpty ? 'archivo' : last;
+}
 
 

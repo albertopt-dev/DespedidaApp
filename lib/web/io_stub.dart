@@ -40,4 +40,5 @@ Future<Uint8List?> makeImageThumbnailJpegWeb(
   double quality = 0.8,
 }) async => null;
 
-
+// Stub para plataformas NO web (Android/iOS/macOS/Windows/Linux).
+Future<void> downloadFileWeb(String url, {String? filename}) async {}

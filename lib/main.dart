@@ -18,6 +18,7 @@ import 'package:despedida/web/web_error_handler_stub.dart'
     if (dart.library.html) 'package:despedida/web/web_error_handler.dart';
     
 import 'dart:async';
+import 'dart:html' as html;
 
 
 // ====== CANALES ANDROID ======
@@ -78,10 +79,26 @@ Future<void> main() async {
 
   // Solo Web: persistencia por sesión (se borra al cerrar pestaña)
   if (kIsWeb) {
-    await FirebaseAuth.instance.setPersistence(Persistence.SESSION);
+    // Detecta si la app está instalada como PWA (standalone)
+    bool isStandalone = false;
+    try {
+      final mm = html.window.matchMedia('(display-mode: standalone)');
+      isStandalone = (mm?.matches ?? false) ||
+          (html.window.navigator as dynamic)?.standalone == true; // iOS Safari PWA
+    } catch (_) {
+      isStandalone = false;
+    }
+
+    // 🔐 PERSISTENCIA: LOCAL si es PWA instalada, SESSION si es pestaña normal
+    try {
+      await FirebaseAuth.instance
+          .setPersistence(isStandalone ? Persistence.LOCAL : Persistence.SESSION);
+    } catch (e) {
+      // fallback por si el navegador no permite LOCAL (modo incógnito, etc.)
+      await FirebaseAuth.instance.setPersistence(Persistence.SESSION);
+    }
+
     setupGlobalWebErrorHandler(show: (title, details) {
-      // aquí usa tu UI; como mínimo:
-      // ignore: avoid_print
       print('[WEB][$title] $details');
     });
   }

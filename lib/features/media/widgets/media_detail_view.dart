@@ -27,6 +27,7 @@ class MediaDetailView extends StatefulWidget {
 
   @override
   State<MediaDetailView> createState() => _MediaDetailViewState();
+  
 }
 
 class _MediaDetailViewState extends State<MediaDetailView> {
@@ -61,6 +62,45 @@ class _MediaDetailViewState extends State<MediaDetailView> {
     }
   }
 
+  Future<void> _onDownloadPressed(MediaItem media) async {
+    // Elegimos la URL correcta
+    String? url;
+    String fileName;
+
+    if (media.type == 'image') {
+      // En Web preferimos el derivado JPEG "web-safe"
+      final heicLike = ((media.contentType?.contains('heic') ?? false) ||
+                        (media.contentType?.contains('heif') ?? false) ||
+                        media.ext == 'heic' || media.ext == 'heif');
+
+      url = media.displayURL ?? (heicLike ? null : media.downloadURL);
+      fileName = '${media.id}.${media.displayURL != null ? 'jpg' : (media.ext ?? 'jpg')}';
+    } else {
+      // Vídeo u otros → siempre downloadURL (tienes Content-Disposition: attachment)
+      url = media.downloadURL;
+      fileName = '${media.id}.${media.ext ?? 'mp4'}';
+    }
+
+    if (url == null) {
+      // HEIC sin derivado en Web → no podemos descargar directamente desde el navegador
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Formato no compatible para descargar en este navegador.')),
+        );
+      }
+      return;
+    }
+
+    if (kIsWeb) {
+      // 🔽 Web: descarga nativa del navegador (sin pedir permisos)
+      await webio.downloadFileWeb(url, filename: fileName);
+      return;
+    }
+
+    // 📱 Móvil: si quieres, aquí mantén tu lógica nativa (guardar en galería, etc.)
+    // De momento no hacemos nada para no reintroducir Permission.* en Web.
+  }
+
   @override
   Widget build(BuildContext context) {
     final item = widget.items[_index];
@@ -79,7 +119,12 @@ class _MediaDetailViewState extends State<MediaDetailView> {
                   : media.downloadURL;
               Share.share(shareUrl);
             },
-
+          ),
+          if (kIsWeb)
+          IconButton(
+            icon: const Icon(Icons.download),
+            tooltip: 'Descargar',
+            onPressed: () => _onDownloadPressed(widget.items[_index]),
           ),
         ],
       ),

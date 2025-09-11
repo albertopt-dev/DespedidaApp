@@ -95,7 +95,15 @@ class GaleriaScreen extends StatelessWidget {
                 IconButton(
                   tooltip: 'Descargar selección',
                   icon: const Icon(Icons.download),
-                  onPressed: c.bulkWorking.value ? null : c.downloadSelected,
+                  onPressed: c.bulkWorking.value
+                  ? null
+                  : () async {
+                      if (kIsWeb) {
+                        await _downloadSelectedWeb(context, c); // 👈 web: descarga sin permissions
+                      } else {
+                        await c.downloadSelected();             // 👈 móvil: tu lógica actual intacta
+                      }
+                    },
                 ),
                 IconButton(
                   tooltip: 'Eliminar selección',
@@ -476,6 +484,59 @@ class GaleriaScreen extends StatelessWidget {
       ),
     );
   }
+
+  Future<void> _downloadSelectedWeb(BuildContext context, GalleryController c) async {
+  // Crea un índice rápido id -> MediaItem
+  final Map<String, MediaItem> byId = {
+    for (final m in c.items) m.id: m,
+  };
+
+  // Copia de IDs para no depender de reactividad mientras iteramos
+  final ids = c.selectedIds.toList();
+
+  int started = 0;
+  for (final id in ids) {
+    final media = byId[id];
+    if (media == null) continue;
+
+    String? url;
+    String fileName;
+
+    if (media.type == 'image') {
+      final heicLike = ((media.contentType?.toLowerCase().contains('heic') ?? false) ||
+                        (media.contentType?.toLowerCase().contains('heif') ?? false) ||
+                        media.ext == 'heic' || media.ext == 'heif');
+
+      // En Web: preferimos derivado JPEG seguro (displayURL). Si no hay y es HEIC, no descargamos.
+      url = media.displayURL ?? (heicLike ? null : media.downloadURL);
+      fileName = '${media.id}.${media.displayURL != null ? 'jpg' : (media.ext ?? 'jpg')}';
+    } else {
+      // Vídeo/otros → downloadURL (ya tienes Content-Disposition: attachment en vídeos)
+      url = media.downloadURL;
+      fileName = '${media.id}.${media.ext ?? 'mp4'}';
+    }
+
+    if (url == null) {
+      // HEIC sin derivado en Web: lo saltamos (no rompemos el resto)
+      continue;
+    }
+
+    await webio.downloadFileWeb(url, filename: fileName);
+    started++;
+  }
+
+  // Feedback al usuario
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(
+        started > 0
+          ? 'Descarga iniciada ($started)'
+          : 'Nada descargable (p.ej. HEIC sin derivado)',
+      ),
+    ),
+  );
+}
+
 
   Future<T> _withProgress<T>(
     BuildContext context,
