@@ -61,8 +61,10 @@
 - Pantalla principal 
 <img width="429" height="873" alt="image" src="https://github.com/user-attachments/assets/fe838b37-d3ef-4b3b-9653-a59113417828" />
 
+
 - Chat
 <img width="429" height="874" alt="image" src="https://github.com/user-attachments/assets/f47566e3-f796-4406-a26d-2725d4f048d8" />
+
 
 - Creacion de la prueba y sus funcionalidades
 <img width="425" height="875" alt="image" src="https://github.com/user-attachments/assets/3a8f0648-e6f5-4e93-a32b-7a0eadf82bb8" />
@@ -88,9 +90,9 @@
 ---
 
 ## Estado de publicación
-- Google Play (https://img.shields.io/badge/Google%20Play-pendiente-lightgrey?logo=google-play): ⏳ no publicada
-- TestFlight (iOS) (https://img.shields.io/badge/TestFlight-pendiente-lightgrey?logo=app-store): ⏳ no publicada
-- PWA/Web demo (https://img.shields.io/badge/PWA-pendiente-lightgrey): ⏳ no publicada
+- Google Play: ⏳ no publicada
+- TestFlight (iOS): ⏳ no publicada
+- PWA/Web demo: ⏳ no publicada
 
 > Por ahora no hay builds públicas. Si necesitas evaluarla, puedo compartir un APK/TestFlight privado bajo petición.
 
