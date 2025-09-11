@@ -58,18 +58,21 @@
 
 ## Capturas / Demo
 
-- Pantalla principal 
-<img width="429" height="873" alt="image" src="https://github.com/user-attachments/assets/fe838b37-d3ef-4b3b-9653-a59113417828" />
+- **Pantalla principal**  
+    <p align="left">
+      <img src="https://github.com/user-attachments/assets/fe838b37-d3ef-4b3b-9653-a59113417828" alt="Pantalla principal — mapa (isla del tesoro)" width="360" />
+    </p>
 
+- **Chat del grupo**  
+    <p align="left">
+      <img src="https://github.com/user-attachments/assets/f47566e3-f796-4406-a26d-2725d4f048d8" alt="Chat del grupo" width="360" />
+    </p>
 
-- Chat
-<img width="429" height="874" alt="image" src="https://github.com/user-attachments/assets/f47566e3-f796-4406-a26d-2725d4f048d8" />
-
-
-- Creacion de la prueba y sus funcionalidades
-<img width="425" height="875" alt="image" src="https://github.com/user-attachments/assets/3a8f0648-e6f5-4e93-a32b-7a0eadf82bb8" />
-<img width="430" height="883" alt="image" src="https://github.com/user-attachments/assets/cea2ec8b-395f-4ef0-a7e5-08d10faf914b" />
-
+- **Creación de la prueba y funcionalidades**  
+    <p align="left">
+      <img src="https://github.com/user-attachments/assets/3a8f0648-e6f5-4e93-a32b-7a0eadf82bb8" alt="Selección de prueba — catálogo" width="360" />
+      <img src="https://github.com/user-attachments/assets/cea2ec8b-395f-4ef0-a7e5-08d10faf914b" alt="Prueba personalizada — formulario" width="360" />
+    </p>
 ---
 
 ## Privacidad (resumen)
